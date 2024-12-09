@@ -1,4 +1,5 @@
-BIN := ../$(notdir $(lastword $(abspath .))).so
+BUILD_DIR := ../build
+BIN := ${BUILD_DIR}/$(notdir $(lastword $(abspath .))).so
 
 EXT_H    := h
 EXT_HPP  := h hh hpp hxx h++
@@ -43,4 +44,5 @@ endef
 $(foreach EXT,$(EXT_CXX),$(eval $(call BUILD_CXX,$(EXT))))
 
 $(BIN): $(OBJS) Makefile
+	@mkdir -p $(BUILD_DIR)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
