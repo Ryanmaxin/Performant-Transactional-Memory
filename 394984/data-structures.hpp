@@ -20,6 +20,12 @@ class Transaction {
         Transaction(version gvc);
 };
 
+struct MemorySegment {
+    MemorySegment* next;
+    MemorySegment* prev;
+    MemorySegment(): next{nullptr}, prev{nullptr} {};
+};
+
 struct MemoryRegion {
     MemorySegment* seg_list;
     size_t size;
@@ -28,6 +34,3 @@ struct MemoryRegion {
     MemoryRegion(size_t size, size_t align);
 };
 
-struct MemorySegment {
-
-};

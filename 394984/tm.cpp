@@ -41,12 +41,12 @@ using namespace std;
 **/
 shared_t tm_create(size_t size, size_t align) noexcept {
     MemoryRegion* region = new(std::nothrow) MemoryRegion(size,align);
-    if (!region) return invalid_shared;
-    
+    if (unlikely(!region)) return invalid_shared;
+
     // We allocate the shared memory buffer such that its words are correctly
     // aligned.
     region->start = aligned_alloc(align, size);
-    if (!region->start) {
+    if (unlikely(!region->start)) {
         delete region;
         return invalid_shared;
     }
@@ -57,8 +57,17 @@ shared_t tm_create(size_t size, size_t align) noexcept {
 /** Destroy (i.e. clean-up + free) a given shared memory region.
  * @param shared Shared memory region to destroy, with no running transaction
 **/
-void tm_destroy(shared_t unused(shared)) noexcept {
-    // TODO: tm_destroy(shared_t)
+void tm_destroy(shared_t shared) noexcept {
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+
+    while (region->seg_list) {
+        MemorySegment* next = region->seg_list->next;
+        delete region->seg_list;
+        region->seg_list = next;
+    }
+
+    delete region->start;
+    delete region; 
 }
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
