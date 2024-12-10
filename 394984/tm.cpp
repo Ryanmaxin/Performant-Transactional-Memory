@@ -74,27 +74,30 @@ void tm_destroy(shared_t shared) noexcept {
  * @param shared Shared memory region to query
  * @return Start address of the first allocated segment
 **/
-void* tm_start(shared_t unused(shared)) noexcept {
-    // TODO: tm_start(shared_t)
-    return NULL;
+void* tm_start(shared_t shared) noexcept {
+    /**
+    * @warning Maybe I need to align the memory segment somehow?
+    **/
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    return region->start;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
  * @param shared Shared memory region to query
  * @return First allocated segment size
 **/
-size_t tm_size(shared_t unused(shared)) noexcept {
-    // TODO: tm_size(shared_t)
-    return 0;
+size_t tm_size(shared_t shared) noexcept {
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    return region->size;
 }
 
 /** [thread-safe] Return the alignment (in bytes) of the memory accesses on the given shared memory region.
  * @param shared Shared memory region to query
  * @return Alignment used globally
 **/
-size_t tm_align(shared_t unused(shared)) noexcept {
-    // TODO: tm_align(shared_t)
-    return 0;
+size_t tm_align(shared_t shared) noexcept {
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    return region->align;
 }
 
 /** [thread-safe] Begin a new transaction on the given shared memory region.
@@ -104,14 +107,14 @@ size_t tm_align(shared_t unused(shared)) noexcept {
 **/
 tx_t tm_begin(shared_t unused(shared), bool unused(is_ro)) noexcept {
 
-    Transaction* transaction = new(nothrow) Transaction(gvc);
-    if (!transaction) return invalid_tx;
+    // Transaction* transaction = new(nothrow) Transaction(gvc);
+    // if (!transaction) return invalid_tx;
     // TODO: tm_begin(shared_t)
 
     // ON FAILURE
     return invalid_tx;
     
-    return reinterpret_cast<tx_t>(transaction);
+    // return reinterpret_cast<tx_t>(transaction);
 }
 
 /** [thread-safe] End the given transaction.
@@ -170,5 +173,6 @@ Alloc tm_alloc(shared_t unused(shared), tx_t unused(tx), size_t unused(size), vo
 **/
 bool tm_free(shared_t unused(shared), tx_t unused(tx), void* unused(target)) noexcept {
     // TODO: tm_free(shared_t, tx_t, void*)
+    //CANT FREE INITIAL SEGMENT
     return false;
 }
