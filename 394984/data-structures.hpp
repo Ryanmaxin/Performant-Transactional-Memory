@@ -19,3 +19,15 @@ class Transaction {
     public:
         Transaction(version gvc);
 };
+
+struct MemoryRegion {
+    MemorySegment* seg_list;
+    size_t size;
+    size_t align;
+    void* start;
+    MemoryRegion(size_t size, size_t align);
+};
+
+struct MemorySegment {
+
+};

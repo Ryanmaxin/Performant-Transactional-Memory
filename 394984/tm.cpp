@@ -23,6 +23,7 @@
 // External headers
 #include <unordered_set>
 #include <unordered_map>
+#include <cstdlib>
 
 // Internal headers
 #include <tm.hpp>
@@ -38,9 +39,19 @@ using namespace std;
  * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
  * @return Opaque shared memory region handle, 'invalid_shared' on failure
 **/
-shared_t tm_create(size_t unused(size), size_t unused(align)) noexcept {
-    // TODO: tm_create(size_t, size_t)
-    return invalid_shared;
+shared_t tm_create(size_t size, size_t align) noexcept {
+    MemoryRegion* region = new(std::nothrow) MemoryRegion(size,align);
+    if (!region) return invalid_shared;
+    
+    // We allocate the shared memory buffer such that its words are correctly
+    // aligned.
+    region->start = aligned_alloc(align, size);
+    if (!region->start) {
+        delete region;
+        return invalid_shared;
+    }
+    memset(region->start, 0, size);
+    return region;
 }
 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
@@ -84,7 +95,8 @@ size_t tm_align(shared_t unused(shared)) noexcept {
 **/
 tx_t tm_begin(shared_t unused(shared), bool unused(is_ro)) noexcept {
 
-    Transaction* transaction = new Transaction(gvc);
+    Transaction* transaction = new(nothrow) Transaction(gvc);
+    if (!transaction) return invalid_tx;
     // TODO: tm_begin(shared_t)
 
     // ON FAILURE
