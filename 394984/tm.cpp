@@ -1,6 +1,6 @@
 /**
- * @file   tm.c
- * @author [...]
+ * @file   tm.cpp
+ * @author Ryan Maxin
  *
  * @section LICENSE
  *
@@ -21,12 +21,18 @@
 #endif
 
 // External headers
+#include <unordered_set>
+#include <unordered_map>
 
 // Internal headers
 #include <tm.hpp>
-
+#include "data-structures.hpp"
 #include "macros.hpp"
 
+// Global variables
+version gvc = 0;
+
+using namespace std;
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
  * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
  * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
@@ -77,8 +83,14 @@ size_t tm_align(shared_t unused(shared)) noexcept {
  * @return Opaque transaction ID, 'invalid_tx' on failure
 **/
 tx_t tm_begin(shared_t unused(shared), bool unused(is_ro)) noexcept {
+
+    Transaction* transaction = new Transaction(gvc);
     // TODO: tm_begin(shared_t)
+
+    // ON FAILURE
     return invalid_tx;
+    
+    return reinterpret_cast<tx_t>(transaction);
 }
 
 /** [thread-safe] End the given transaction.
