@@ -66,7 +66,7 @@ void tm_destroy(shared_t shared) noexcept {
         region->seg_list = next;
     }
 
-    delete region->start;
+    free(region->start);
     delete region; 
 }
 
@@ -105,16 +105,17 @@ size_t tm_align(shared_t shared) noexcept {
  * @param is_ro  Whether the transaction is read-only
  * @return Opaque transaction ID, 'invalid_tx' on failure
 **/
-tx_t tm_begin(shared_t unused(shared), bool unused(is_ro)) noexcept {
+tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
+    // Write Transaction (1) 
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    Transaction* txn = new(nothrow) Transaction(gvc,region,is_ro);
+    if (!txn) return invalid_tx;
 
-    // Transaction* transaction = new(nothrow) Transaction(gvc);
-    // if (!transaction) return invalid_tx;
-    // TODO: tm_begin(shared_t)
-
-    // ON FAILURE
-    return invalid_tx;
+    /**
+     * @attention may need to do more here. But leave it for now.
+     */
     
-    // return reinterpret_cast<tx_t>(transaction);
+    return reinterpret_cast<tx_t>(txn);
 }
 
 /** [thread-safe] End the given transaction.
@@ -123,6 +124,9 @@ tx_t tm_begin(shared_t unused(shared), bool unused(is_ro)) noexcept {
  * @return Whether the whole transaction committed
 **/
 bool tm_end(shared_t unused(shared), tx_t unused(tx)) noexcept {
+    /**
+     * @attention Need to delete the transaction here.
+     */
     // TODO: tm_end(shared_t, tx_t)
     return false;
 }
@@ -135,7 +139,39 @@ bool tm_end(shared_t unused(shared), tx_t unused(tx)) noexcept {
  * @param target Target start address (in a private region)
  * @return Whether the whole transaction can continue
 **/
-bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) noexcept {
+bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
+    Transaction *txn = reinterpret_cast<Transaction*>(tx);
+    if (txn->is_ro) {
+        
+    } else {
+        // Write Transaction (2)
+        // Convert void* to word* for easier manipulation
+        word* target_start = (word*)(target);
+        word* source_start = (word*)(source);
+
+        // Invariant: size is a multiple of the alignment
+        size_t num_words = size / tm_align(shared);
+
+        // Go through every word we want to read from and add it to the read set
+        for (size_t i = 0; i < num_words; i += 1) {
+            word* source_addr = source_start + i;
+            word* target_addr = target_start + i;
+
+            word val = 0;
+            bool is_valid = false;
+
+            // Check if the address was written to previously
+            auto it = txn->write_set.find(source_addr);
+            if (it != txn->write_set.end()) {
+                // Address was previously written to
+                val = it->second.val;
+                is_valid = true;
+            }
+
+            // Keep track of all of the places we will need to read to
+            txn->read_set[source_addr].emplace_back(target_addr,val,is_valid);
+        }
+    }
     // TODO: tm_read(shared_t, tx_t, void const*, size_t, void*)
     return false;
 }
@@ -148,9 +184,27 @@ bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* unused(source
  * @param target Target start address (in the shared region)
  * @return Whether the whole transaction can continue
 **/
-bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) noexcept {
-    // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
+bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
+    // Write Transaction (2)
+    Transaction *txn = reinterpret_cast<Transaction*>(tx);
+
+    word* target_start = (word*)(target);
+    word* source_start = (word*)(source);
+
+    // Invariant: size is a multiple of the alignment
+    size_t num_words = size / tm_align(shared);
+
+    // Go through every word we want to read from and add it to the read set
+    for (size_t i = 0; i < num_words; i += 1) {
+        word* source_addr = source_start + i;
+        word* target_addr = target_start + i;
+
+        word val = *source_addr;
+        // Keep track of all of the places we will need to read to
+        txn->write_set.insert_or_assign(target_addr,WriteOperation(source_addr,val));
+    }
     return false;
+    
 }
 
 /** [thread-safe] Memory allocation in the given transaction.
