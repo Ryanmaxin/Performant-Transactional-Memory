@@ -2,6 +2,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <list>
+#include <atomic>
 
 // Internal headers
 #include <tm.hpp>
@@ -53,5 +54,13 @@ struct Transaction {
     MemoryRegion* region;
     bool is_ro;
     Transaction(version gvc, MemoryRegion* region_, bool is_ro_);
+};
+
+struct VersionedWriteLock {
+    atomic<word> version_and_lock;
+    VersionedWriteLock();
+    void lock();
+    void unlock();
+    word getVersion();
 };
 
