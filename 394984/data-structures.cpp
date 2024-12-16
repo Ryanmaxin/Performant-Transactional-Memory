@@ -49,6 +49,7 @@ void VersionedWriteLock::unlock() {
     word current = version_and_lock.load(std::memory_order_relaxed);
     word new_value = (current & ~1u) + 2;  // Increment the version and clear the lock bit
     version_and_lock.store(new_value, std::memory_order_release);
+    dprint("Unlocked");
 }
 
 word VersionedWriteLock::getVersion() {

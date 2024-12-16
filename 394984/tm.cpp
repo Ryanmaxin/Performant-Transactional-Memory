@@ -179,6 +179,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
         if (!lock->lock()) {
             // Here we must delete all previously held locks
             freeHeldLocks(locks_held);
+            dprint("[FAIL1] tm_end(",shared,",",tx,") -> true");
             return false;
         }
         locks_held.push_back(lock);
@@ -189,9 +190,10 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
 
     // (5) Validate the read-set
     for (auto read : txn->read_set) {
-        if (!validateRead(shared,read,wv+1)) {
+        if (!validateRead(shared,read,wv+1,false)) {
             // Here we must delete all previously held locks
             freeHeldLocks(locks_held);
+            dprint("[FAIL2] tm_end(",shared,",",tx,") -> true");
             return false;
         }
     }
