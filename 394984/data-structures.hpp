@@ -30,7 +30,7 @@ struct VersionedWriteLock {
 };
 
 struct MemoryRegion {
-    list<void*> seg_list;
+    unordered_set<void*> seg_list;
     VersionedWriteLock* list_lock;
     size_t size;
     size_t align;

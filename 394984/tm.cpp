@@ -60,8 +60,8 @@ shared_t tm_create(size_t size, size_t align) noexcept {
     // aligned.
     region->start = aligned_alloc(align, size);
     if (unlikely(!region->start)) {
-        delete region;
         delete[] region->locks;
+        delete region;
         return invalid_shared;
     }
     memset(region->start, 0, size);
@@ -307,7 +307,7 @@ Alloc tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) noe
     }
     // Lock the list before we try to add the new segment
     if (!region->list_lock->lock()) return Alloc::abort;
-    region->seg_list.push_back(new_seg);
+    region->seg_list.insert(new_seg);
     region->list_lock->unlock();
 
 
@@ -324,8 +324,24 @@ Alloc tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) noe
  * @param target Address of the first byte of the previously allocated segment to deallocate
  * @return Whether the whole transaction can continue
 **/
-bool tm_free(shared_t unused(shared), tx_t unused(tx), void* unused(target)) noexcept {
-    // TODO: tm_free(shared_t, tx_t, void*)
-    //CANT FREE INITIAL SEGMENT
-    return false;
+bool tm_free(shared_t shared, tx_t unused(tx), void* target) noexcept {
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+
+    // Can't free initial segment
+    if (target == region->start) return false;
+
+    // Lock the list before we work on it
+    if (!region->list_lock->lock()) return false;
+
+    // Segment must exist
+    auto it = region->seg_list.find(target);
+    if (it == region->seg_list.end()) return false;
+
+    // Delete and remove the memory region
+    free(*it);
+    region->seg_list.erase(it);
+
+    region->list_lock->unlock();
+
+    return true;
 }
