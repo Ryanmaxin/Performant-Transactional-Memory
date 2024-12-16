@@ -1,10 +1,19 @@
 #include "data-structures.hpp"
+#include <sstream>
+#include <iostream>
 
+// Custom print function
+template <typename... Args>
+void dprint(Args&&... args) {
+    std::ostringstream oss;
+    oss << "[Thread " << std::this_thread::get_id() << "] ";
+    (oss << ... << args); // Fold expression to handle multiple arguments
+    std::cout << oss.str() << std::endl;
+}
 
 Transaction::Transaction(version gvc, MemoryRegion* region_, bool is_ro_): rv{gvc}, region{region_}, is_ro{is_ro_} {}
 
 MemoryRegion::MemoryRegion(size_t size_, size_t align_): seg_list{nullptr}, size{size_}, align{align_}, start{nullptr} {}
-// ReadOperation::ReadOperation(word* target_, word val_): target{target_}, val{val_} {}
 
 WriteOperation::WriteOperation(word* source_, word val_): source{source_}, val{val_} {}
 
@@ -15,6 +24,7 @@ bool VersionedWriteLock::lock() {
     size_t spin_count = 0;
     while (true) {  
         if (++spin_count > SPIN_COUNT_MAX) {
+            dprint("Locking failed");
             return false;
         }
         // We hope the lock bit is not set
@@ -24,6 +34,7 @@ bool VersionedWriteLock::lock() {
 
         if (version_and_lock.compare_exchange_weak(expected, desired, std::memory_order_acquire, std::memory_order_relaxed)) {
             // Successfully took the lock
+            dprint("Locking succeeded");
             return true;
         }
         // If we failed then we need to wait for the lock bit to be cleared.

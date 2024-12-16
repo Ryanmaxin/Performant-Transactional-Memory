@@ -26,12 +26,22 @@
 #include <cstdlib>
 #include <list>
 #include <atomic>
+#include <thread>
 
 // Internal headers
 #include <tm.hpp>
+#include "helpers.hpp"
 #include "data-structures.hpp"
 #include "macros.hpp"
-#include "helpers.hpp"
+
+// Custom print function
+template <typename... Args>
+void dprint(Args&&... args) {
+    std::ostringstream oss;
+    oss << "[Thread " << std::this_thread::get_id() << "] ";
+    (oss << ... << args); // Fold expression to handle multiple arguments
+    std::cout << oss.str() << std::endl;
+}
 
 // Global variables
 atomic<version> gvc{0};
@@ -43,6 +53,7 @@ using namespace std;
  * @return Opaque shared memory region handle, 'invalid_shared' on failure
 **/
 shared_t tm_create(size_t size, size_t align) noexcept {
+    dprint("[CALL] tm_create(",size,",",align,")");
     MemoryRegion* region = new(std::nothrow) MemoryRegion(size,align);
     if (unlikely(!region)) return invalid_shared;
 
@@ -65,6 +76,7 @@ shared_t tm_create(size_t size, size_t align) noexcept {
         return invalid_shared;
     }
     memset(region->start, 0, size);
+    dprint("[RETURN] tm_create(",size,",",align,") -> ",region);
     return region;
 }
 
@@ -72,6 +84,7 @@ shared_t tm_create(size_t size, size_t align) noexcept {
  * @param shared Shared memory region to destroy, with no running transaction
 **/
 void tm_destroy(shared_t shared) noexcept {
+    dprint("[CALL] tm_destroy(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
     // Free all of the segments and clear the list
@@ -83,6 +96,7 @@ void tm_destroy(shared_t shared) noexcept {
     delete[] region->locks;
 
     free(region->start);
+    dprint("[RETURN] tm_destroy(",shared,")");
     delete region; 
 }
 
@@ -94,7 +108,9 @@ void* tm_start(shared_t shared) noexcept {
     /**
     * @warning Maybe I need to align the memory segment somehow?
     **/
+    dprint("[CALL] tm_start(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    dprint("[RETURN] tm_start(",shared,") -> ",region->start);
     return region->start;
 }
 
@@ -103,7 +119,9 @@ void* tm_start(shared_t shared) noexcept {
  * @return First allocated segment size
 **/
 size_t tm_size(shared_t shared) noexcept {
+    dprint("[CALL] tm_size(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    dprint("[RETURN] tm_size(",shared,") -> ",region->size);
     return region->size;
 }
 
@@ -112,7 +130,9 @@ size_t tm_size(shared_t shared) noexcept {
  * @return Alignment used globally
 **/
 size_t tm_align(shared_t shared) noexcept {
+    dprint("[CALL] tm_align(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    dprint("[RETURN] tm_align(",shared,") -> ",region->align);
     return region->align;
 }
 
@@ -122,6 +142,7 @@ size_t tm_align(shared_t shared) noexcept {
  * @return Opaque transaction ID, 'invalid_tx' on failure
 **/
 tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
+    dprint("[CALL] tm_begin(",shared,",",is_ro,")");
     // Write Transaction (1) 
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
     Transaction* txn = new(nothrow) Transaction(gvc.load(memory_order_relaxed),region,is_ro);
@@ -130,7 +151,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
     /**
      * @attention may need to do more here. But leave it for now.
      */
-    
+    dprint("[RETURN] tm_begin(",shared,",",is_ro,") -> ",txn);
     return reinterpret_cast<tx_t>(txn);
 }
 
@@ -140,6 +161,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
  * @return Whether the whole transaction committed
 **/
 bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
+    dprint("[CALL] tm_end(",shared,",",tx,")");
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
     
     list<VersionedWriteLock*> locks_held;
@@ -188,6 +210,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
 
     // Transaction successful, cleanup and return
     delete txn;
+    dprint("[RETURN] tm_end(",shared,",",tx,") -> true");
     return false;
 }
 
@@ -200,6 +223,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
  * @return Whether the whole transaction can continue
 **/
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
+    dprint("[CALL] tm_read(",shared,",",tx,",",source,",",size,",",target,")");
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
 
     // Convert void* to word* for easier manipulation
@@ -210,6 +234,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     size_t num_words = size / tm_align(shared);
 
     if (txn->is_ro) {
+        dprint("txn is read only");
         // Low-Cost Read-Only Transaction
         // (2) Run through a speculative execution
         for (size_t i = 0; i < num_words; i += 1) {
@@ -256,6 +281,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             txn->read_set.insert(source_addr);
         }
     }
+    dprint("[RETURN] tm_read(",shared,",",tx,",",source,",",size,",",target,") -> true");
     return true;
 }
 
@@ -268,6 +294,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
  * @return Whether the whole transaction can continue
 **/
 bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
+    dprint("[CALL] tm_write(",shared,",",tx,",",source,",",size,",",target,")");
     // Write Transaction (2)
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
 
@@ -286,6 +313,7 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
         // Keep track of all of the places we will need to read to
         txn->write_set.insert_or_assign(target_addr,WriteOperation(source_addr,val));
     }
+    dprint("[RETURN] tm_write(",shared,",",tx,",",source,",",size,",",target,") -> true");
     return true;
 }
 
@@ -297,7 +325,7 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
  * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
 **/
 Alloc tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) noexcept {
-    // TODO: tm_alloc(shared_t, tx_t, size_t, void**)
+    dprint("[CALL] tm_alloc(",shared,",",tx,",",size,",",target,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
 
@@ -315,6 +343,7 @@ Alloc tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) noe
 
     *target = new_seg;
 
+    dprint("[RETURN] tm_alloc(",shared,",",tx,",",size,",",target,") -> ",Alloc::success);
     return Alloc::success;
 }
 
@@ -325,6 +354,7 @@ Alloc tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) noe
  * @return Whether the whole transaction can continue
 **/
 bool tm_free(shared_t shared, tx_t unused(tx), void* target) noexcept {
+    dprint("[CALL] tm_free(",shared,",",tx,",",target,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
     // Can't free initial segment
@@ -343,5 +373,6 @@ bool tm_free(shared_t shared, tx_t unused(tx), void* target) noexcept {
 
     region->list_lock->unlock();
 
+    dprint("[RETURN] tm_free(",shared,",",tx,",",target,") -> true");
     return true;
 }
