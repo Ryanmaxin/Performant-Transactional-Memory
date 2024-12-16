@@ -29,10 +29,10 @@
 #include <tm.hpp>
 #include "data-structures.hpp"
 #include "macros.hpp"
+#include <helpers.hpp>
 
 // Global variables
 version gvc = 0;
-const size_t NUM_LOCKS = 10000;
 
 using namespace std;
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
@@ -45,6 +45,9 @@ shared_t tm_create(size_t size, size_t align) noexcept {
     if (unlikely(!region)) return invalid_shared;
 
     // We will just allocate a large fixed number of locks, rather then locking each individual word
+    /**
+     * @attention Check if this has worse performance
+     */
     region->locks = new(std::nothrow) VersionedWriteLock[NUM_LOCKS];
     if (unlikely(!region->locks)) {
         delete region;
@@ -132,10 +135,17 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
  * @param tx     Transaction to end
  * @return Whether the whole transaction committed
 **/
-bool tm_end(shared_t unused(shared), tx_t unused(tx)) noexcept {
-    /**
-     * @attention Need to delete the transaction here.
-     */
+bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
+    Transaction *txn = reinterpret_cast<Transaction*>(tx);
+    // First, check that all of the locations we want to read from have not been 
+
+
+
+
+
+
+    delete txn;
+    
     
     return false;
 }
@@ -166,19 +176,25 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             word* source_addr = source_start + i;
             word* target_addr = target_start + i;
 
-            word val = 0;
-            bool is_valid = false;
+            // Prevalidate read
+            validateRead(shared,source_addr,txn->rv);
 
             // Check if the address was written to previously
             auto it = txn->write_set.find(source_addr);
             if (it != txn->write_set.end()) {
                 // Address was previously written to
-                val = it->second.val;
-                is_valid = true;
+                *target_addr = it->second.val;
+            }
+            else {
+                // Address was not previously written to, so get the actual value from memory
+                *target_addr = *source_addr;
             }
 
-            // Keep track of all of the places we will need to read to
-            txn->read_set[source_addr].emplace_back(target_addr,val,is_valid);
+            // Postvalidate read
+            validateRead(shared,source_addr,txn->rv);
+
+            // Keep track of all of the places we read from
+            txn->read_set.insert(source_addr);
         }
     }
     return true;

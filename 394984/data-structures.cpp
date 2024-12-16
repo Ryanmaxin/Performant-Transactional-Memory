@@ -5,15 +5,19 @@ Transaction::Transaction(version gvc, MemoryRegion* region_, bool is_ro_): rv{gv
 
 MemoryRegion::MemoryRegion(size_t size_, size_t align_): seg_list{nullptr}, size{size_}, align{align_}, start{nullptr} {}
 
-ReadOperation::ReadOperation(word* target_, word val_, bool is_valid_): target{target_}, val{val_}, is_valid{is_valid_} {}
+// ReadOperation::ReadOperation(word* target_, word val_): target{target_}, val{val_} {}
 
 WriteOperation::WriteOperation(word* source_, word val_): source{source_}, val{val_} {}
 
 VersionedWriteLock::VersionedWriteLock(): version_and_lock{0} {};
 
-void VersionedWriteLock::lock() {
+bool VersionedWriteLock::lock() {
     word expected, desired;
+    size_t spin_count = 0;
     while (true) {  
+        if (++spin_count > SPIN_COUNT_MAX) {
+            return false;
+        }
         // We hope the lock bit is not set
         expected = version_and_lock.load(std::memory_order_relaxed) & ~1;
         // We want the same timestamp but with the lock bit set
@@ -21,7 +25,7 @@ void VersionedWriteLock::lock() {
 
         if (version_and_lock.compare_exchange_weak(expected, desired, std::memory_order_acquire, std::memory_order_relaxed)) {
             // Successfully took the lock
-            return;
+            return true;
         }
         // If we failed then we need to wait for the lock bit to be cleared.
         while (version_and_lock.load(std::memory_order_relaxed) & 1) {
@@ -39,4 +43,8 @@ void VersionedWriteLock::unlock() {
 
 word VersionedWriteLock::getVersion() {
     return version_and_lock.load(std::memory_order_relaxed) >> 1;
+}
+
+bool VersionedWriteLock::isLocked() {
+    return version_and_lock.load(std::memory_order_relaxed) & 1;
 }

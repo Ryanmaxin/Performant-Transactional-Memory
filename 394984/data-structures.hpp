@@ -15,12 +15,16 @@ using word = uintptr_t;
 
 using version = uint64_t;
 
+constexpr size_t SPIN_COUNT_MAX = 1000;
+constexpr size_t NUM_LOCKS = 10000;
+
 struct VersionedWriteLock {
     atomic<word> version_and_lock;
     VersionedWriteLock();
-    void lock();
+    bool lock();
     void unlock();
     word getVersion();
+    bool isLocked();
 };
 
 struct MemorySegment {
@@ -41,13 +45,12 @@ struct MemoryRegion {
     MemoryRegion(size_t size, size_t align);
 };
 
-struct ReadOperation {
-    // All of the locations we need to 
-    word* target;
-    word val;
-    bool is_valid; 
-    ReadOperation(word* target_, word val_, bool is_valid_);
-};
+// struct ReadOperation {
+//     // All of the locations we need to 
+//     word* target;
+//     word val;
+//     ReadOperation(word* target_, word val_);
+// };
 
 struct WriteOperation {
     // All of the locations we need to 
@@ -59,8 +62,8 @@ struct WriteOperation {
 
 struct Transaction {
     version rv;
-    map<word*, list<ReadOperation>> read_set;
-    map<word*, WriteOperation> write_set;
+    unordered_set<word*> read_set;
+    unordered_map<word*, WriteOperation> write_set;
     MemoryRegion* region;
     bool is_ro;
     Transaction(version gvc, MemoryRegion* region_, bool is_ro_);
