@@ -10,3 +10,7 @@
 bool validateRead(shared_t shared, word* addr, version rv);
 
 void freeHeldLocks(list<VersionedWriteLock*>& locks_held);
+
+// Custom print function
+template <typename... Args>
+void print(Args&&... args);

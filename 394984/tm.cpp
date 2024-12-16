@@ -74,11 +74,13 @@ shared_t tm_create(size_t size, size_t align) noexcept {
 void tm_destroy(shared_t shared) noexcept {
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
-    while (region->seg_list) {
-        MemorySegment* next = region->seg_list->next;
-        delete region->seg_list;
-        region->seg_list = next;
+    // Free all of the segments and clear the list
+    for (auto seg : region->seg_list) {
+        free(seg);
     }
+    region->seg_list.clear();
+
+    delete[] region->locks;
 
     free(region->start);
     delete region; 
@@ -217,7 +219,10 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             *target_addr = *source_addr;
 
             // Postvalidate read
-            if (!validateRead(shared,source_addr,txn->rv)) return false;
+            if (!validateRead(shared,source_addr,txn->rv)) {
+                delete txn;
+                return false;
+            }
         }
     } else {
         // Write Transaction (2)
@@ -228,7 +233,11 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             word* target_addr = target_start + i;
 
             // Prevalidate read
-            if (!validateRead(shared,source_addr,txn->rv)) return false;
+            if (!validateRead(shared,source_addr,txn->rv)) {
+                delete txn;
+                return false;
+            }
+            
 
             // Check if the address was written to previously.
             // This will determine if we need to read from the write set or the shared memory region
@@ -238,7 +247,10 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             else *target_addr = *source_addr;
 
             // Postvalidate read
-            if (!validateRead(shared,source_addr,txn->rv)) return false;
+            if (!validateRead(shared,source_addr,txn->rv)) {
+                delete txn;
+                return false;
+            }
 
             // Keep track of all of the places we read from
             txn->read_set.insert(source_addr);
@@ -284,9 +296,26 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
  * @param target Pointer in private memory receiving the address of the first byte of the newly allocated, aligned segment
  * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
 **/
-Alloc tm_alloc(shared_t unused(shared), tx_t unused(tx), size_t unused(size), void** unused(target)) noexcept {
+Alloc tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) noexcept {
     // TODO: tm_alloc(shared_t, tx_t, size_t, void**)
-    return Alloc::abort;
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+
+
+    void* new_seg = aligned_alloc(tm_align(shared), size);
+    if (unlikely(!new_seg)) {
+        return Alloc::nomem;
+    }
+    // Lock the list before we try to add the new segment
+    if (!region->list_lock->lock()) return Alloc::abort;
+    region->seg_list.push_back(new_seg);
+    region->list_lock->unlock();
+
+
+    memset(new_seg, 0, size);
+
+    *target = new_seg;
+
+    return Alloc::success;
 }
 
 /** [thread-safe] Memory freeing in the given transaction.

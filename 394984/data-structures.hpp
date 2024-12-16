@@ -29,17 +29,9 @@ struct VersionedWriteLock {
     bool isLocked();
 };
 
-struct MemorySegment {
-    /**
-     * @attention may need to update to store ptr to actual location
-     */
-    MemorySegment* next;
-    MemorySegment* prev;
-    MemorySegment(): next{nullptr}, prev{nullptr} {};
-};
-
 struct MemoryRegion {
-    MemorySegment* seg_list;
+    list<void*> seg_list;
+    VersionedWriteLock* list_lock;
     size_t size;
     size_t align;
     VersionedWriteLock* locks;
