@@ -1,6 +1,7 @@
 // External headers
 #include <unordered_set>
 #include <unordered_map>
+#include <map>
 #include <list>
 #include <atomic>
 
@@ -13,6 +14,14 @@ using namespace std;
 using word = uintptr_t;
 
 using version = uint64_t;
+
+struct VersionedWriteLock {
+    atomic<word> version_and_lock;
+    VersionedWriteLock();
+    void lock();
+    void unlock();
+    word getVersion();
+};
 
 struct MemorySegment {
     /**
@@ -27,6 +36,7 @@ struct MemoryRegion {
     MemorySegment* seg_list;
     size_t size;
     size_t align;
+    VersionedWriteLock* locks;
     void* start;
     MemoryRegion(size_t size, size_t align);
 };
@@ -49,18 +59,12 @@ struct WriteOperation {
 
 struct Transaction {
     version rv;
-    unordered_map<word*, list<ReadOperation>> read_set;
-    unordered_map<word*, WriteOperation> write_set;
+    map<word*, list<ReadOperation>> read_set;
+    map<word*, WriteOperation> write_set;
     MemoryRegion* region;
     bool is_ro;
     Transaction(version gvc, MemoryRegion* region_, bool is_ro_);
 };
 
-struct VersionedWriteLock {
-    atomic<word> version_and_lock;
-    VersionedWriteLock();
-    void lock();
-    void unlock();
-    word getVersion();
-};
+
 

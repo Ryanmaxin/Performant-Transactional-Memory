@@ -32,6 +32,7 @@
 
 // Global variables
 version gvc = 0;
+const size_t NUM_LOCKS = 10000;
 
 using namespace std;
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
@@ -43,11 +44,19 @@ shared_t tm_create(size_t size, size_t align) noexcept {
     MemoryRegion* region = new(std::nothrow) MemoryRegion(size,align);
     if (unlikely(!region)) return invalid_shared;
 
+    // We will just allocate a large fixed number of locks, rather then locking each individual word
+    region->locks = new(std::nothrow) VersionedWriteLock[NUM_LOCKS];
+    if (unlikely(!region->locks)) {
+        delete region;
+        return invalid_shared;
+    }
+
     // We allocate the shared memory buffer such that its words are correctly
     // aligned.
     region->start = aligned_alloc(align, size);
     if (unlikely(!region->start)) {
         delete region;
+        delete[] region->locks;
         return invalid_shared;
     }
     memset(region->start, 0, size);
@@ -127,7 +136,7 @@ bool tm_end(shared_t unused(shared), tx_t unused(tx)) noexcept {
     /**
      * @attention Need to delete the transaction here.
      */
-    // TODO: tm_end(shared_t, tx_t)
+    
     return false;
 }
 
@@ -172,8 +181,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             txn->read_set[source_addr].emplace_back(target_addr,val,is_valid);
         }
     }
-    // TODO: tm_read(shared_t, tx_t, void const*, size_t, void*)
-    return false;
+    return true;
 }
 
 /** [thread-safe] Write operation in the given transaction, source in a private region and target in the shared region.
@@ -203,8 +211,7 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
         // Keep track of all of the places we will need to read to
         txn->write_set.insert_or_assign(target_addr,WriteOperation(source_addr,val));
     }
-    return false;
-    
+    return true;
 }
 
 /** [thread-safe] Memory allocation in the given transaction.

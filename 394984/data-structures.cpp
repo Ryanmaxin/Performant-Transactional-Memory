@@ -25,7 +25,7 @@ void VersionedWriteLock::lock() {
         }
         // If we failed then we need to wait for the lock bit to be cleared.
         while (version_and_lock.load(std::memory_order_relaxed) & 1) {
-            __builtin_ia32_pause();
+            // Spin : )
         }
     }
 }
