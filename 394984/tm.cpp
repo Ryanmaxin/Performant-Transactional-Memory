@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <cstdlib>
 #include <list>
+#include <atomic>
 
 // Internal headers
 #include <tm.hpp>
@@ -33,7 +34,7 @@
 #include "helpers.hpp"
 
 // Global variables
-version gvc = 0;
+atomic<version> gvc{0};
 
 using namespace std;
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
@@ -121,7 +122,7 @@ size_t tm_align(shared_t shared) noexcept {
 tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
     // Write Transaction (1) 
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
-    Transaction* txn = new(nothrow) Transaction(gvc,region,is_ro);
+    Transaction* txn = new(nothrow) Transaction(gvc.load(memory_order_relaxed),region,is_ro);
     if (!txn) return invalid_tx;
 
     /**
@@ -158,7 +159,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     }
     // Now we have every lock we need
     // (4) Increment the global version-clock
-    version wv = increment(&gvc);
+    version wv = gvc.fetch_add(1,memory_order_relaxed);
 
     // (5) Validate the read-set
     for (auto read : txn->read_set) {
@@ -198,18 +199,30 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
 **/
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
+
+    // Convert void* to word* for easier manipulation
+    word* target_start = (word*)(target);
+    word* source_start = (word*)(source);
+
+    // Invariant: size is a multiple of the alignment
+    size_t num_words = size / tm_align(shared);
+
     if (txn->is_ro) {
-        
+        // Low-Cost Read-Only Transaction
+        // (2) Run through a speculative execution
+        for (size_t i = 0; i < num_words; i += 1) {
+            word* source_addr = source_start + i;
+            word* target_addr = target_start + i;
+
+            *target_addr = *source_addr;
+
+            // Postvalidate read
+            if (!validateRead(shared,source_addr,txn->rv)) return false;
+        }
     } else {
         // Write Transaction (2)
-        // Convert void* to word* for easier manipulation
-        word* target_start = (word*)(target);
-        word* source_start = (word*)(source);
 
-        // Invariant: size is a multiple of the alignment
-        size_t num_words = size / tm_align(shared);
-
-        // Go through every word we want to read from and add it to the read set
+        // Go through every word we want to read and post validate it
         for (size_t i = 0; i < num_words; i += 1) {
             word* source_addr = source_start + i;
             word* target_addr = target_start + i;

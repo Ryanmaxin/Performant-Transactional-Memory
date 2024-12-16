@@ -9,6 +9,4 @@
 */
 bool validateRead(shared_t shared, word* addr, version rv);
 
-version increment(version* v);
-
 void freeHeldLocks(list<VersionedWriteLock*>& locks_held);
