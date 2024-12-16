@@ -25,6 +25,7 @@ struct VersionedWriteLock {
     bool lock();
     void unlock();
     word getVersion();
+    void setVersion(version v);
     bool isLocked();
 };
 

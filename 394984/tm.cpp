@@ -24,6 +24,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <cstdlib>
+#include <list>
 
 // Internal headers
 #include <tm.hpp>
@@ -137,16 +138,53 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
 **/
 bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
-    // First, check that all of the locations we want to read from have not been 
+    
+    list<VersionedWriteLock*> locks_held;
 
+    /**
+     * @attention A possible optimization is to move onto the next lock if we fail to acquire the current one
+     */
 
+    // (3) Lock the write-set
+    for (auto keyval : txn->write_set) {
+        word* target_addr = keyval.first;
+        VersionedWriteLock* lock = &txn->region->locks[(word)target_addr % NUM_LOCKS];
+        if (!lock->lock()) {
+            // Here we must delete all previously held locks
+            freeHeldLocks(locks_held);
+            return false;
+        }
+        locks_held.push_back(lock);
+    }
+    // Now we have every lock we need
+    // (4) Increment the global version-clock
+    version wv = increment(&gvc);
 
+    // (5) Validate the read-set
+    for (auto read : txn->read_set) {
+        if (!validateRead(shared,read,wv+1)) {
+            // Here we must delete all previously held locks
+            freeHeldLocks(locks_held);
+            return false;
+        }
+    }
 
+    // (6) Commit and release the locks
+    // Commit all of our writes to the shared memory
 
+    for (auto keyval : txn->write_set) {
+        word* target_addr = keyval.first;
+        word val = keyval.second.val;
 
+        *target_addr = val;
+        VersionedWriteLock* lock = &txn->region->locks[(word)target_addr % NUM_LOCKS];
+        lock->setVersion(wv);
+    }
+
+    freeHeldLocks(locks_held);
+
+    // Transaction successful, cleanup and return
     delete txn;
-    
-    
     return false;
 }
 
@@ -214,7 +252,7 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
     // Invariant: size is a multiple of the alignment
     size_t num_words = size / tm_align(shared);
 
-    // Go through every word we want to read from and add it to the read set
+    // Go through every word we want to write to and add it to the write set
     for (size_t i = 0; i < num_words; i += 1) {
         word* source_addr = source_start + i;
         word* target_addr = target_start + i;

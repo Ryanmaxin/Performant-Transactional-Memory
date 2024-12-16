@@ -48,3 +48,9 @@ word VersionedWriteLock::getVersion() {
 bool VersionedWriteLock::isLocked() {
     return version_and_lock.load(std::memory_order_relaxed) & 1;
 }
+
+void VersionedWriteLock::setVersion(version v) {
+    word current = version_and_lock.load(std::memory_order_relaxed);
+    word new_val = v << 1 | 1; // Set the version while keeping the lock locked
+    version_and_lock.store(version_and_lock, std::memory_order_relaxed);
+}
