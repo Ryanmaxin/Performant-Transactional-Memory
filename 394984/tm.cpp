@@ -64,6 +64,7 @@ shared_t tm_create(size_t size, size_t align) noexcept {
     region->locks = new(std::nothrow) VersionedWriteLock[NUM_LOCKS];
     if (unlikely(!region->locks)) {
         delete region;
+        dprint("[FAIL1] tm_create(",size,",",align,") -> ",invalid_shared);
         return invalid_shared;
     }
 
@@ -71,6 +72,7 @@ shared_t tm_create(size_t size, size_t align) noexcept {
     // aligned.
     region->start = aligned_alloc(align, size);
     if (unlikely(!region->start)) {
+        dprint("[FAIL2] tm_create(",size,",",align,") -> ",invalid_shared);
         delete[] region->locks;
         delete region;
         return invalid_shared;
