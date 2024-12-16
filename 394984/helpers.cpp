@@ -1,6 +1,6 @@
 #include <tm.hpp>
-#include <data-structures.hpp>
-#include <helpers.hpp>
+#include "data-structures.hpp"
+#include "helpers.hpp"
 
 bool validateRead(shared_t shared, word* addr, version rv) {
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);

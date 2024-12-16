@@ -29,7 +29,7 @@
 #include <tm.hpp>
 #include "data-structures.hpp"
 #include "macros.hpp"
-#include <helpers.hpp>
+#include "helpers.hpp"
 
 // Global variables
 version gvc = 0;
@@ -177,21 +177,17 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             word* target_addr = target_start + i;
 
             // Prevalidate read
-            validateRead(shared,source_addr,txn->rv);
+            if (!validateRead(shared,source_addr,txn->rv)) return false;
 
-            // Check if the address was written to previously
+            // Check if the address was written to previously.
+            // This will determine if we need to read from the write set or the shared memory region
             auto it = txn->write_set.find(source_addr);
-            if (it != txn->write_set.end()) {
-                // Address was previously written to
-                *target_addr = it->second.val;
-            }
-            else {
-                // Address was not previously written to, so get the actual value from memory
-                *target_addr = *source_addr;
-            }
+
+            if (it != txn->write_set.end()) *target_addr = it->second.val;
+            else *target_addr = *source_addr;
 
             // Postvalidate read
-            validateRead(shared,source_addr,txn->rv);
+            if (!validateRead(shared,source_addr,txn->rv)) return false;
 
             // Keep track of all of the places we read from
             txn->read_set.insert(source_addr);

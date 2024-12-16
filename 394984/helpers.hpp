@@ -1,5 +1,6 @@
+#pragma once
 #include <tm.hpp>
-#include <data-structures.hpp>
+#include "data-structures.hpp"
 
 /* Validation: make sure the address we want to read from:
 1. Is not locked
