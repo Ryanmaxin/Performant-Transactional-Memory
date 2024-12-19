@@ -23,6 +23,13 @@ bool validateRead(shared_t shared, word* addr, version rv, bool check_lock = tru
     return true;
 }
 
+void printUnorderedSet(const std::unordered_set<void*>& pointers) {
+    std::cout << "Unordered Set contains:" << std::endl;
+    for (void* ptr : pointers) {
+        std::cout << ptr << std::endl;
+    }
+}
+
 
 void freeHeldLocks(list<VersionedWriteLock*>& locks_held) {
     for (auto lock : locks_held) {

@@ -31,7 +31,7 @@ struct VersionedWriteLock {
 };
 
 struct MemoryRegion {
-    unordered_set<void*> seg_list;
+    unordered_set<void*> master_seg_list;
     VersionedWriteLock* list_lock;
     size_t size;
     size_t align;
@@ -39,13 +39,6 @@ struct MemoryRegion {
     void* start;
     MemoryRegion(size_t size, size_t align);
 };
-
-// struct ReadOperation {
-//     // All of the locations we need to 
-//     word* target;
-//     word val;
-//     ReadOperation(word* target_, word val_);
-// };
 
 struct WriteOperation {
     // All of the locations we need to 
@@ -59,9 +52,10 @@ struct Transaction {
     version rv;
     unordered_set<word*> read_set;
     unordered_map<word*, WriteOperation> write_set;
-    MemoryRegion* region;
+    unordered_set<void*> seg_list;
+    unordered_set<void*> free_seg_list;
     bool is_ro;
-    Transaction(version gvc, MemoryRegion* region_, bool is_ro_);
+    Transaction(version gvc, unordered_set<void*>& seg_list_, bool is_ro_);
 };
 
 

@@ -11,9 +11,9 @@ void dprint(Args&&... args) {
     std::cout << oss.str() << std::endl;
 }
 
-Transaction::Transaction(version gvc, MemoryRegion* region_, bool is_ro_): rv{gvc}, region{region_}, is_ro{is_ro_} {}
+Transaction::Transaction(version gvc, unordered_set<void*>& seg_list_, bool is_ro_): rv{gvc}, seg_list{seg_list_}, is_ro{is_ro_} {}
 
-MemoryRegion::MemoryRegion(size_t size_, size_t align_): seg_list{nullptr}, size{size_}, align{align_}, start{nullptr} {}
+MemoryRegion::MemoryRegion(size_t size_, size_t align_): list_lock{new VersionedWriteLock()}, size{size_}, align{align_}, start{nullptr} {}
 
 WriteOperation::WriteOperation(word* source_, word val_): source{source_}, val{val_} {}
 

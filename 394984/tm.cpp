@@ -90,10 +90,10 @@ void tm_destroy(shared_t shared) noexcept {
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
     // Free all of the segments and clear the list
-    for (auto seg : region->seg_list) {
+    for (auto seg : region->master_seg_list) {
         free(seg);
     }
-    region->seg_list.clear();
+    region->master_seg_list.clear();
 
     delete[] region->locks;
 
@@ -147,7 +147,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
     dprint("[CALL] tm_begin(",shared,",",is_ro,")");
     // Write Transaction (1) 
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
-    Transaction* txn = new(nothrow) Transaction(gvc.load(memory_order_relaxed),region,is_ro);
+    Transaction* txn = new(nothrow) Transaction(gvc.load(memory_order_relaxed),region->master_seg_list,is_ro);
     if (!txn) return invalid_tx;
 
     /**
@@ -164,6 +164,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
 **/
 bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     dprint("[CALL] tm_end(",shared,",",tx,")");
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
     
     list<VersionedWriteLock*> locks_held;
@@ -175,7 +176,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     // (3) Lock the write-set
     for (auto keyval : txn->write_set) {
         word* target_addr = keyval.first;
-        VersionedWriteLock* lock = &txn->region->locks[(word)target_addr % NUM_LOCKS];
+        VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
         if (!lock->lock()) {
             // Here we must delete all previously held locks
             freeHeldLocks(locks_held);
@@ -206,11 +207,33 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
         word val = keyval.second.val;
 
         *target_addr = val;
-        VersionedWriteLock* lock = &txn->region->locks[(word)target_addr % NUM_LOCKS];
+        VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
         lock->setVersion(wv);
     }
 
     freeHeldLocks(locks_held);
+
+    // We need to acquire the lock for the master_seg_list before we work on it.
+    if (!region->list_lock->lock()) return false;
+    // Now we free all of the memory segments we allocated
+    for (auto seg : txn->seg_list) {
+        // If segment is not in the master list, add it
+        auto it = region->master_seg_list.find(seg);
+        if (it == region->master_seg_list.end()) region->master_seg_list.insert(seg);
+
+    }
+    for (auto seg : txn->free_seg_list) {
+        // If segment is in the master list, remove it
+        auto it = region->master_seg_list.find(seg);
+        if (it != region->master_seg_list.end()) region->master_seg_list.erase(it);
+    }
+
+    for (auto seg : txn->free_seg_list) {
+        free(seg);
+    }
+
+    // Then unlock the master_seg_list
+    region->list_lock->unlock();
 
     // Transaction successful, cleanup and return
     delete txn;
@@ -328,20 +351,20 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
  * @param target Pointer in private memory receiving the address of the first byte of the newly allocated, aligned segment
  * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
 **/
-Alloc tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) noexcept {
+Alloc tm_alloc(shared_t unused(shared), tx_t tx, size_t size, void** target) noexcept {
     dprint("[CALL] tm_alloc(",shared,",",tx,",",size,",",target,")");
-    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    Transaction *txn = reinterpret_cast<Transaction*>(tx);
 
 
     void* new_seg = aligned_alloc(tm_align(shared), size);
     if (unlikely(!new_seg)) {
+        dprint("[FAIL] tm_alloc(",shared,",",tx,",",size,",",target,") -> ",Alloc::nomem);
         return Alloc::nomem;
     }
-    // Lock the list before we try to add the new segment
-    if (!region->list_lock->lock()) return Alloc::abort;
-    region->seg_list.insert(new_seg);
-    region->list_lock->unlock();
+    // Add the new segment to the local seg_list
 
+    dprint("Locked segment list");
+    txn->seg_list.insert(new_seg);
 
     memset(new_seg, 0, size);
 
@@ -357,25 +380,23 @@ Alloc tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) noe
  * @param target Address of the first byte of the previously allocated segment to deallocate
  * @return Whether the whole transaction can continue
 **/
-bool tm_free(shared_t shared, tx_t unused(tx), void* target) noexcept {
+bool tm_free(shared_t unused(shared), tx_t tx, void* unused(target)) noexcept {
     dprint("[CALL] tm_free(",shared,",",tx,",",target,")");
+    Transaction *txn = reinterpret_cast<Transaction*>(tx);
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
+    dprint("HELLO");
     // Can't free initial segment
     if (target == region->start) return false;
-
-    // Lock the list before we work on it
-    if (!region->list_lock->lock()) return false;
-
+    dprint("HELLO");
     // Segment must exist
-    auto it = region->seg_list.find(target);
-    if (it == region->seg_list.end()) return false;
-
-    // Delete and remove the memory region
-    free(*it);
-    region->seg_list.erase(it);
-
-    region->list_lock->unlock();
+    dprint(txn,"   ",txn->seg_list.size());
+    auto it = txn->seg_list.find(target);
+    if (it == txn->seg_list.end()) return false;
+    dprint("HELLO");
+    // Move the segment to the free_seg_list, and erase it from the original list
+    txn->free_seg_list.insert(*it);
+    txn->seg_list.erase(it);
 
     dprint("[RETURN] tm_free(",shared,",",tx,",",target,") -> true");
     return true;
