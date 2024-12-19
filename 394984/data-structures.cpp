@@ -34,7 +34,7 @@ bool VersionedWriteLock::lock() {
 
         if (version_and_lock.compare_exchange_weak(expected, desired, std::memory_order_acquire, std::memory_order_relaxed)) {
             // Successfully took the lock
-            dprint("Locking succeeded");
+            // dprint("Locking succeeded");
             return true;
         }
         // If we failed then we need to wait for the lock bit to be cleared.
@@ -49,7 +49,7 @@ void VersionedWriteLock::unlock() {
     word current = version_and_lock.load(std::memory_order_relaxed);
     word new_value = (current & ~1u) + 2;  // Increment the version and clear the lock bit
     version_and_lock.store(new_value, std::memory_order_release);
-    dprint("Unlocked");
+    // dprint("Unlocked");
 }
 
 word VersionedWriteLock::getVersion() {

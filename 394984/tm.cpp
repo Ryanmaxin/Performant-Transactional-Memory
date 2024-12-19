@@ -89,6 +89,8 @@ void tm_destroy(shared_t shared) noexcept {
     dprint("[CALL] tm_destroy(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
+    dprint("Number of segments: ",region->master_seg_list.size());
+
     // Free all of the segments and clear the list
     for (auto seg : region->master_seg_list) {
         free(seg);
@@ -148,6 +150,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
     // Write Transaction (1) 
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
     Transaction* txn = new(nothrow) Transaction(gvc.load(memory_order_relaxed),region->master_seg_list,is_ro);
+    dprint("Region seglist size: ",txn->seg_list.size());
     if (!txn) return invalid_tx;
 
     /**
@@ -385,15 +388,13 @@ bool tm_free(shared_t unused(shared), tx_t tx, void* unused(target)) noexcept {
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
-    dprint("HELLO");
+    dprint("Transaction seglist size: ",txn->seg_list.size());
+
     // Can't free initial segment
     if (target == region->start) return false;
-    dprint("HELLO");
     // Segment must exist
-    dprint(txn,"   ",txn->seg_list.size());
     auto it = txn->seg_list.find(target);
     if (it == txn->seg_list.end()) return false;
-    dprint("HELLO");
     // Move the segment to the free_seg_list, and erase it from the original list
     txn->free_seg_list.insert(*it);
     txn->seg_list.erase(it);

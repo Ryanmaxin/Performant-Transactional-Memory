@@ -1,19 +1,28 @@
 #include "../include/tm.hpp"
 #include <iostream>
 
-constexpr int NUM_ELEMS = 50;
+constexpr int NUM_ELEMS = 10;
 constexpr int ALIGN = 8;
 constexpr int SIZE = NUM_ELEMS*ALIGN;
+
+void printSegment(void* segment, size_t size, bool fillWithZeros = false, bool fillWithLinear = false) {
+    for (size_t i = 0; i < size; i++) {
+        if (fillWithZeros) {
+            ((int*)segment)[i] = 0;
+        } else if (fillWithLinear) {
+            ((int*)segment)[i] = i;
+        }
+        std::cout << ((int*)segment)[i] << " ";
+    }
+    std::cout << std::endl;
+}
 
 int main()
 {
     std::cout << "SIZE: " << SIZE << std::endl;
     void* target = new int[NUM_ELEMS];
 
-    for (int i = 0; i < NUM_ELEMS; i++) {
-        ((int*)target)[i] = i;
-        std::cout << "TARGET: " << ((int*)target)[i] << std::endl;
-    }   
+    printSegment(target,NUM_ELEMS,true);
    
     shared_t shared = tm_create(80000,ALIGN);
     void *source = nullptr;
@@ -22,24 +31,26 @@ int main()
     // void* source = tm_start(shared);
     tm_alloc(shared,txn,SIZE,&source);
     tm_read(shared,txn,source,NUM_ELEMS*sizeof(int),target);
+    printSegment(target,NUM_ELEMS);
+    printSegment(target,NUM_ELEMS,false,true);
 
-    std::cout <<"source: " << source << std::endl;
-
-    for (int i = 0; i < NUM_ELEMS; i++) {
-        ((int*)target)[i] = i;
-        std::cout << "TARGET: " << ((int*)target)[i] << std::endl;
-    }   
     tm_write(shared,txn,target,SIZE,source);  
     // tm_free(shared,txn,source);
     tm_end(shared,txn);
 
-    for (int i = 0; i < NUM_ELEMS; i++) {
-        std::cout << "SOURCE: " << ((int*)source)[i] << std::endl;
-    } 
+    printSegment(target,NUM_ELEMS);
 
-    tm_begin(shared,true);
-    tm_free(shared,txn,source);
-    tm_end(shared,txn);
+    void* target2 = new int[NUM_ELEMS];
+    tx_t txn1 = tm_begin(shared,true);
+    printSegment(target2,NUM_ELEMS);
+    tm_read(shared,txn1,source,NUM_ELEMS*sizeof(int),target2);
+    printSegment(target2,NUM_ELEMS);
+    tm_free(shared,txn1,source);
+
+    tm_alloc(shared,txn1,SIZE,&source);
+    tm_alloc(shared,txn1,SIZE,&source);
+    
+    tm_end(shared,txn1);
 
     tm_destroy(shared);
     return 0;
