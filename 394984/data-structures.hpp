@@ -7,6 +7,7 @@
 #include <list>
 #include <atomic>
 #include <mutex>
+#include <memory>
 
 // Internal headers
 #include <tm.hpp>
@@ -20,6 +21,7 @@ using version = uint64_t;
 
 constexpr size_t NUM_LOCKS = 10000;
 
+//Our special spinlock which holds a version in addition to the lock bit
 struct VersionedWriteLock {
     atomic<word> version_and_lock;
     VersionedWriteLock();
@@ -30,6 +32,7 @@ struct VersionedWriteLock {
     bool isLocked();
 };
 
+// Represents a shared memory region and the locks that protect it
 struct MemoryRegion {
     list<void*> seg_list;
     mutex list_lock;

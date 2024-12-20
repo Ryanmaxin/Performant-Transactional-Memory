@@ -28,14 +28,15 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <cstring>
 
 // Internal headers
 #include <tm.hpp>
-#include "helpers.hpp"
 #include "data-structures.hpp"
 #include "macros.hpp"
 
 // Global variables
+// This is our global version clock.
 atomic<version> gvc{0};
 
 using namespace std;
@@ -45,18 +46,13 @@ using namespace std;
  * @return Opaque shared memory region handle, 'invalid_shared' on failure
 **/
 shared_t tm_create(size_t size, size_t align) noexcept {
-    //dprint("[CALL] tm_create(",size,",",align,")");
     MemoryRegion* region = new(std::nothrow) MemoryRegion(size,align);
     if (unlikely(!region)) return invalid_shared;
 
-    // We will just allocate a large fixed number of locks, rather then locking each individual word
-    /**
-     * @attention Check if this has worse performance
-     */
+    // We will just allocate a large fixed number of locks, rather then locking each individual word to reduce the amount of time it takes to initialize the library.
     region->locks = new(std::nothrow) VersionedWriteLock[NUM_LOCKS];
     if (unlikely(!region->locks)) {
         delete region;
-        //dprint("[FAIL1] tm_create(",size,",",align,") -> ",invalid_shared);
         return invalid_shared;
     }
 
@@ -64,13 +60,12 @@ shared_t tm_create(size_t size, size_t align) noexcept {
     // aligned.
     region->start = aligned_alloc(align, size);
     if (unlikely(!region->start)) {
-        //dprint("[FAIL2] tm_create(",size,",",align,") -> ",invalid_shared);
         delete[] region->locks;
         delete region;
         return invalid_shared;
     }
+    // As required, we zero out the memory
     memset(region->start, 0, size);
-    //dprint("[RETURN] tm_create(",size,",",align,") -> ",region);
     return region;
 }
 
@@ -78,10 +73,9 @@ shared_t tm_create(size_t size, size_t align) noexcept {
  * @param shared Shared memory region to destroy, with no running transaction
 **/
 void tm_destroy(shared_t shared) noexcept {
-    //dprint("[CALL] tm_destroy(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
-    //dprint("[RETURN] tm_destroy(",shared,")");
+    //destructor will do most of the work here
     delete region; 
 }
 
@@ -90,12 +84,7 @@ void tm_destroy(shared_t shared) noexcept {
  * @return Start address of the first allocated segment
 **/
 void* tm_start(shared_t shared) noexcept {
-    /**
-    * @warning Maybe I need to align the memory segment somehow?
-    **/
-    //dprint("[CALL] tm_start(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
-    //dprint("[RETURN] tm_start(",shared,") -> ",region->start);
     return region->start;
 }
 
@@ -104,9 +93,7 @@ void* tm_start(shared_t shared) noexcept {
  * @return First allocated segment size
 **/
 size_t tm_size(shared_t shared) noexcept {
-    //dprint("[CALL] tm_size(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
-    //dprint("[RETURN] tm_size(",shared,") -> ",region->size);
     return region->size;
 }
 
@@ -115,9 +102,7 @@ size_t tm_size(shared_t shared) noexcept {
  * @return Alignment used globally
 **/
 size_t tm_align(shared_t shared) noexcept {
-    // //dprint("[CALL] tm_align(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
-    // //dprint("[RETURN] tm_align(",shared,") -> ",region->align);
     return region->align;
 }
 
@@ -127,13 +112,10 @@ size_t tm_align(shared_t shared) noexcept {
  * @return Opaque transaction ID, 'invalid_tx' on failure
 **/
 tx_t tm_begin(shared_t unused(shared), bool is_ro) noexcept {
-    //dprint("[CALL] tm_begin(",shared,",",is_ro,")");
     // Write Transaction (1) 
     Transaction* txn = new(nothrow) Transaction(gvc.load(),is_ro);
-    
     if (!txn) return invalid_tx;
 
-    //dprint("[RETURN] tm_begin(",shared,",",is_ro,") -> ",txn);
     return reinterpret_cast<tx_t>(txn);
 }
 
@@ -146,42 +128,48 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     // dprint("[CALL] tm_end(",shared,",",tx,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
-    
+
+    // Keep track of all the locks we are currently holding
     unordered_set<VersionedWriteLock*> locks_held;
 
-    /**
-     * @attention A possible optimization is to move onto the next lock if we fail to acquire the current one
-     */
+    // A possible optimization is to move onto the next lock if we fail to acquire the current one. But we won't do that here.
 
+    // We can skip most of the work if it is a readonly transaction
     if (!txn->is_ro) {
         // (3) Lock the write-set
         for (auto& keyval : txn->write_set) {
             char* target_addr = keyval.first;
             VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
             if (!lock->lock() && locks_held.find(lock) == locks_held.end()) {
-                // Here we must delete all previously held locks
-                freeHeldLocks(locks_held);
+                // Here we must delete all previously held locks and cleanup
+                for (auto lock : locks_held) {
+                    lock->unlock();
+                }
                 delete txn;
                 return false;
             }
             locks_held.insert(lock);
         }
         // Now we have every lock we need
+
         // (4) Increment the global version-clock
+        // Note: You need to add + 1 here! You would think it would return the incremented value but it doesn't. I think this one thing caused me up to 4 hours of debugging : (
         version wv = gvc.fetch_add(1) + 1;
 
-        // (5) Validate the read-set
+        // (5) Validate the read-set (only if someone has touched the gvc since the transaction started)
         if (txn->rv + 1 != wv) {
             for (auto& read : txn->read_set) {
-
                 // Get the lock which protects the address we want to read from.
                 VersionedWriteLock* lock = &region->locks[(word)read % NUM_LOCKS];
                 bool lock_owned = (locks_held.find(lock) != locks_held.end());
+
+                // If the lock is owned, it must be owned by us.
                 if ((!lock_owned && lock->isLocked()) || lock->getVersion() > txn->rv) {
-                    // Here we must delete all previously held locks
-                    freeHeldLocks(locks_held);
+                    // Here we must delete all previously held locks and cleanup
+                    for (auto lock : locks_held) {
+                        lock->unlock();
+                    }
                     delete txn;
-                    //dprint2("TM_END: read-set not valid");
                     return false;
                 }
             }   
@@ -196,6 +184,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
 
             memcpy(target_addr,val,word_size);
             VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
+            // setVersion also unlocks the lock
             lock->setVersion(wv);
         }
 
@@ -206,7 +195,6 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     }
 
     // Transaction successful, cleanup and return
-    //dprint("[RETURN] tm_end(",shared,",",tx,") -> true");
     delete txn;
     return true;
 }
@@ -220,11 +208,10 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
  * @return Whether the whole transaction can continue
 **/
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
-    //dprint("[CALL] tm_read(",shared,",",tx,",",source,",",size,",",target,")");
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
-    // Convert void* to word* for easier manipulation
+    // Convert void* to char* for bytewise manipulation
     char* target_start = (char*)(target);
     char* source_start = (char*)(source);
 
@@ -242,7 +229,6 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             VersionedWriteLock* lock = &region->locks[(word)source_addr % NUM_LOCKS];
             word version = lock->getVersion();
             if (lock->isLocked() || version > txn->rv) {
-                //dprint2("Failed postvalidate",lock->isLocked(),new_version !=version,new_version > txn->rv);
                 delete txn;
                 return false;
             }
@@ -252,7 +238,6 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             // Post validate read
             word new_version = lock->getVersion();
             if (lock->isLocked() || new_version != version || new_version > txn->rv) {
-                //dprint2("Failed postvalidate",lock->isLocked(),new_version !=version,new_version > txn->rv);
                 delete txn;
                 return false;
             }
@@ -260,7 +245,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     } else {
         // Write Transaction (2)
 
-        // Go through every word we want to read and post validate it
+        // Go through every word we want to read from and pre/post validate it
         for (size_t i = 0; i < size; i += word_size) {
             char* source_addr = source_start + i;
             char* target_addr = target_start + i;
@@ -268,6 +253,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             // Get the lock which protects the address we want to read from.
             VersionedWriteLock* lock = &region->locks[(word)source_addr % NUM_LOCKS];
 
+            // Pre validate read
             word version = lock->getVersion();
             if (lock->isLocked() || version > txn->rv) {
                 //dprint2("Failed prevalidate HERE");
@@ -283,8 +269,10 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             if (it != txn->write_set.end()) val_addr = (char*)it->second->val;
             else val_addr = source_addr;
 
+            // We also copy the value directly. This technically breaks isolation, but we don't care since the value will be ignored if we later find out that the transaction must abort
             memcpy(target_addr,val_addr,word_size);
 
+            // Post validate read
             word new_version = lock->getVersion();
             if (lock->isLocked() || new_version != version) {
                 //dprint2("Failed postvalidate HERE");
@@ -296,7 +284,6 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             txn->read_set.insert(source_addr);
         }
     }
-    //dprint("[RETURN] tm_read(",shared,",",tx,",",source,",",size,",",target,") -> true");
     return true;
 }
 
@@ -309,11 +296,11 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
  * @return Whether the whole transaction can continue
 **/
 bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
-    //dprint("[CALL] tm_write(",shared,",",tx,",",source,",",size,",",target,")");
 
     // Write Transaction (2)
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
 
+    // Convert to char* for easy bytewise manipulation
     char* target_start = (char*)(target);
     char* source_start = (char*)(source);
 
@@ -326,9 +313,9 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
         char* target_addr = target_start + i;
 
         // Keep track of all of the places we will need to write to
+        // This WriteOperation implicitly stores the value we want to write in dynamic memory, as we don't know how big it will be until the alignment is given.
         txn->write_set.insert_or_assign(target_addr,make_unique<WriteOperation>(source_addr,word_size));
     }
-    //dprint("[RETURN] tm_write(",shared,",",tx,",",source,",",size,",",target,") -> true");
     return true;
 }
 
@@ -344,18 +331,17 @@ Alloc tm_alloc(shared_t shared, tx_t tx, size_t size, void** target) noexcept {
 
 
     void* new_seg = aligned_alloc(tm_align(shared), size);
-    if (unlikely(!new_seg)) {
-        return Alloc::nomem;
-    }
+    if (unlikely(!new_seg)) return Alloc::nomem;
 
+    // Zero out the new allocation, as required
     memset(new_seg, 0, size);
 
     // Add the segment to the local transaction seg
+    // This means if the transaction aborts we can free it without any other transactions seeing it.
     txn->seg_list.push_back(new_seg);
 
     *target = new_seg;
 
-    //dprint("[RETURN] tm_alloc(",shared,",",tx,",",size,",",target,") -> ",Alloc::success);
     return Alloc::success;
 }
 
@@ -366,5 +352,7 @@ Alloc tm_alloc(shared_t shared, tx_t tx, size_t size, void** target) noexcept {
  * @return Whether the whole transaction can continue
 **/
 bool tm_free(shared_t unused(shared), tx_t unused(tx), void* unused(target)) noexcept {
+    // We just keep tm_free as a dummy function in this implementation. The result is that successful transactions slowly build up memory until we call tm_destroy.
+    // I did try other implementations where we would keep track of everything and have full open memory, but it slowed the implementation down a ton by having to lock global data structures.
     return true;
 }

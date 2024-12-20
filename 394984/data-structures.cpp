@@ -1,11 +1,12 @@
 #include "data-structures.hpp"
 #include <sstream>
 #include <iostream>
+#include <cstring>
 
 Transaction::Transaction(version gvc, bool is_ro_): rv{gvc}, is_ro{is_ro_} {}
 
 Transaction::~Transaction() {
-    // Free all of the segments and clear the list
+    // Free all of the segments so that they don't appear to the other transactions
     for (auto& seg : seg_list) {
         free(seg);
     }
@@ -15,16 +16,20 @@ Transaction::~Transaction() {
 MemoryRegion::MemoryRegion(size_t size_, size_t align_): size{size_}, align{align_}, locks{nullptr}, start{nullptr} {}
 
 MemoryRegion::~MemoryRegion() {
-    // Free all of the segments and clear the list
+    // Free all of the segments so when we destroy the TM object
     for (auto& seg : seg_list) {
         free(seg);
     }
     seg_list.clear();
+    // Remove all of the locks
     delete[] locks;
+
+    // Delete the initial memory segment
     free(start);
 }
 
 WriteOperation::WriteOperation(char* data, size_t word_size): val{aligned_alloc(word_size, word_size)} {
+    // val holds the data we want to write
     memcpy(val, data, word_size);
 }
 
@@ -35,6 +40,7 @@ WriteOperation::~WriteOperation() {
 VersionedWriteLock::VersionedWriteLock(): version_and_lock{0} {};
 
 bool VersionedWriteLock::lock() {
+    // A possible optimization is to spin while continually checking the lock. I found that in our case it is better to just restart the transaction.
     word expected, desired;
     // We hope the lock bit is not set
     expected = version_and_lock.load() & ~1;
@@ -45,6 +51,7 @@ bool VersionedWriteLock::lock() {
         // Successfully took the lock
         return true;
     }
+    // We failed to take the lock, so exit
     return false;
 }
 
