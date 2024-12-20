@@ -27,6 +27,7 @@
 #include <list>
 #include <atomic>
 #include <thread>
+#include <mutex>
 
 // Internal headers
 #include <tm.hpp>
@@ -37,10 +38,10 @@
 // Custom print function
 template <typename... Args>
 void dprint(Args&&... args) {
-    // std::ostringstream oss;
-    // oss << "[Thread " << std::this_thread::get_id() << "] ";
-    // (oss << ... << args); // Fold expression to handle multiple arguments
-    // std::cout << oss.str() << std::endl;
+    std::ostringstream oss;
+    oss << "[Thread " << std::this_thread::get_id() << "] ";
+    (oss << ... << args); // Fold expression to handle multiple arguments
+    std::cout << oss.str() << std::endl;
 }
 
 // Global variables
@@ -98,7 +99,6 @@ void tm_destroy(shared_t shared) noexcept {
     region->master_seg_list.clear();
 
     delete[] region->locks;
-    delete region->list_lock;
 
     free(region->start);
     dprint("[RETURN] tm_destroy(",shared,")");
@@ -150,7 +150,10 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
     dprint("[CALL] tm_begin(",shared,",",is_ro,")");
     // Write Transaction (1) 
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
+    // We need to lock the master_seg_list, as we are copying from it.
+    region->list_lock.lock();
     Transaction* txn = new(nothrow) Transaction(gvc.load(memory_order_relaxed),region->master_seg_list,is_ro);
+    region->list_lock.unlock();
     dprint("Region seglist size: ",txn->seg_list.size());
     if (!txn) return invalid_tx;
 
@@ -218,7 +221,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     freeHeldLocks(locks_held);
 
     // We need to acquire the lock for the master_seg_list before we work on it.
-    if (!region->list_lock->lock()) return false;
+    region->list_lock.lock();
     // Now we free all of the memory segments we allocated
     for (auto seg : txn->seg_list) {
         // If segment is not in the master list, add it
@@ -237,7 +240,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     }
 
     // Then unlock the master_seg_list
-    region->list_lock->unlock();
+    region->list_lock.unlock();
 
     // Transaction successful, cleanup and return
     delete txn;
