@@ -5,15 +5,15 @@
 // Custom print function
 template <typename... Args>
 void dprint(Args&&... args) {
-    // std::ostringstream oss;
-    // oss << "[Thread " << std::this_thread::get_id() << "] ";
-    // (oss << ... << args); // Fold expression to handle multiple arguments
-    // std::cout << oss.str() << std::endl;
+    std::ostringstream oss;
+    oss << "[Thread " << std::this_thread::get_id() << "] ";
+    (oss << ... << args); // Fold expression to handle multiple arguments
+    std::cout << oss.str() << std::endl;
 }
 
 Transaction::Transaction(version gvc, unordered_set<void*>& seg_list_, bool is_ro_): rv{gvc}, seg_list{seg_list_}, is_ro{is_ro_} {}
 
-MemoryRegion::MemoryRegion(size_t size_, size_t align_): list_lock{new VersionedWriteLock()}, size{size_}, align{align_}, start{nullptr} {}
+MemoryRegion::MemoryRegion(size_t size_, size_t align_): size{size_}, align{align_}, locks{nullptr}, start{nullptr} {}
 
 WriteOperation::WriteOperation(word* source_, word val_): source{source_}, val{val_} {}
 
@@ -28,7 +28,7 @@ bool VersionedWriteLock::lock() {
 
     if (version_and_lock.compare_exchange_weak(expected, desired)) {
         // Successfully took the lock
-        dprint("Locking succeeded");
+        // dprint("Locking succeeded");
         return true;
     }
     dprint("Locking failed");
@@ -40,7 +40,7 @@ void VersionedWriteLock::unlock() {
     word current = version_and_lock.load();
     word new_value = (current & ~1u) + 2;  // Increment the version and clear the lock bit
     version_and_lock.store(new_value);
-    dprint("Unlocked");
+    // dprint("Unlocked");
 }
 
 word VersionedWriteLock::getVersion() {

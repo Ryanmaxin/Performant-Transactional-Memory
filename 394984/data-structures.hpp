@@ -32,7 +32,7 @@ struct VersionedWriteLock {
 
 struct MemoryRegion {
     unordered_set<void*> master_seg_list;
-    VersionedWriteLock* list_lock;
+    mutex list_lock;
     size_t size;
     size_t align;
     VersionedWriteLock* locks;
@@ -53,6 +53,7 @@ struct Transaction {
     unordered_set<word*> read_set;
     unordered_map<word*, WriteOperation> write_set;
     unordered_set<void*> seg_list;
+    unordered_set<void*> local_only_seg_list;
     unordered_set<void*> free_seg_list;
     bool is_ro;
     Transaction(version gvc, unordered_set<void*>& seg_list_, bool is_ro_);

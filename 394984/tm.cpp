@@ -38,6 +38,14 @@
 // Custom print function
 template <typename... Args>
 void dprint(Args&&... args) {
+    // std::ostringstream oss;
+    // oss << "[Thread " << std::this_thread::get_id() << "] ";
+    // (oss << ... << args); // Fold expression to handle multiple arguments
+    // std::cout << oss.str() << std::endl;
+}
+// Custom print function
+template <typename... Args>
+void dprint2(Args&&... args) {
     std::ostringstream oss;
     oss << "[Thread " << std::this_thread::get_id() << "] ";
     (oss << ... << args); // Fold expression to handle multiple arguments
@@ -89,8 +97,6 @@ shared_t tm_create(size_t size, size_t align) noexcept {
 void tm_destroy(shared_t shared) noexcept {
     dprint("[CALL] tm_destroy(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
-
-    dprint("Number of segments: ",region->master_seg_list.size());
 
     // Free all of the segments and clear the list
     for (auto seg : region->master_seg_list) {
@@ -152,9 +158,8 @@ tx_t tm_begin(shared_t shared, bool is_ro) noexcept {
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
     // We need to lock the master_seg_list, as we are copying from it.
     region->list_lock.lock();
-    Transaction* txn = new(nothrow) Transaction(gvc.load(memory_order_relaxed),region->master_seg_list,is_ro);
+    Transaction* txn = new(nothrow) Transaction(gvc.load(),region->master_seg_list,is_ro);
     region->list_lock.unlock();
-    dprint("Region seglist size: ",txn->seg_list.size());
     if (!txn) return invalid_tx;
 
     /**
@@ -180,67 +185,76 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
      * @attention A possible optimization is to move onto the next lock if we fail to acquire the current one
      */
 
-    // (3) Lock the write-set
-    for (auto keyval : txn->write_set) {
-        word* target_addr = keyval.first;
-        VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
-        if (!lock->lock()) {
-            // Here we must delete all previously held locks
-            freeHeldLocks(locks_held);
-            dprint("[FAIL1] tm_end(",shared,",",tx,") -> false");
-            return false;
+    
+    if (!txn->is_ro) {
+        // (3) Lock the write-set
+        for (auto keyval : txn->write_set) {
+            word* target_addr = keyval.first;
+            VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
+            if (!lock->lock()) {
+                // Here we must delete all previously held locks
+                freeHeldLocks(locks_held);
+                cleanup(txn);
+                dprint("[FAIL1] tm_end(",shared,",",tx,") -> false");
+                return false;
+            }
+            locks_held.push_back(lock);
         }
-        locks_held.push_back(lock);
-    }
-    // Now we have every lock we need
-    // (4) Increment the global version-clock
-    version wv = gvc.fetch_add(1,memory_order_relaxed);
+        // Now we have every lock we need
+        // (4) Increment the global version-clock
+        version wv = gvc.fetch_add(1);
 
-    // (5) Validate the read-set
-    for (auto read : txn->read_set) {
-        if (!validateRead(shared,read,wv+1,false)) {
-            // Here we must delete all previously held locks
-            freeHeldLocks(locks_held);
-            dprint("[FAIL2] tm_end(",shared,",",tx,") -> false");
-            return false;
+        // (5) Validate the read-set
+        for (auto read : txn->read_set) {
+            if (!validateRead(shared,read,wv+1,false)) {
+                // Here we must delete all previously held locks
+                freeHeldLocks(locks_held);
+                cleanup(txn);
+                dprint("[FAIL2] tm_end(",shared,",",tx,") -> false");
+                return false;
+            }
         }
+
+        // (6) Commit and release the locks
+        // Commit all of our writes to the shared memory
+
+        dprint2("COMMITING WRITE");
+
+        for (auto keyval : txn->write_set) {
+            word* target_addr = keyval.first;
+            word val = keyval.second.val;
+
+            dprint2("Writing ",val," to ",target_addr);
+            *target_addr = val;
+            VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
+            lock->setVersion(wv);
+        }
+
+        freeHeldLocks(locks_held);
+    
+
+        // We need to acquire the lock for the master_seg_list before we work on it.
+        region->list_lock.lock();
+        // Now we free all of the memory segments we allocated
+        for (auto seg : txn->seg_list) {
+            // If segment is not in the master list, add it
+            auto it = region->master_seg_list.find(seg);
+            if (it == region->master_seg_list.end()) region->master_seg_list.insert(seg);
+
+        }
+        for (auto seg : txn->free_seg_list) {
+            // If segment is in the master list, remove it
+            auto it = region->master_seg_list.find(seg);
+            if (it != region->master_seg_list.end()) region->master_seg_list.erase(it);
+        }
+
+        for (auto seg : txn->free_seg_list) {
+            free(seg);
+        }
+
+        // Then unlock the master_seg_list
+        region->list_lock.unlock();
     }
-
-    // (6) Commit and release the locks
-    // Commit all of our writes to the shared memory
-
-    for (auto keyval : txn->write_set) {
-        word* target_addr = keyval.first;
-        word val = keyval.second.val;
-
-        *target_addr = val;
-        VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
-        lock->setVersion(wv);
-    }
-
-    freeHeldLocks(locks_held);
-
-    // We need to acquire the lock for the master_seg_list before we work on it.
-    region->list_lock.lock();
-    // Now we free all of the memory segments we allocated
-    for (auto seg : txn->seg_list) {
-        // If segment is not in the master list, add it
-        auto it = region->master_seg_list.find(seg);
-        if (it == region->master_seg_list.end()) region->master_seg_list.insert(seg);
-
-    }
-    for (auto seg : txn->free_seg_list) {
-        // If segment is in the master list, remove it
-        auto it = region->master_seg_list.find(seg);
-        if (it != region->master_seg_list.end()) region->master_seg_list.erase(it);
-    }
-
-    for (auto seg : txn->free_seg_list) {
-        free(seg);
-    }
-
-    // Then unlock the master_seg_list
-    region->list_lock.unlock();
 
     // Transaction successful, cleanup and return
     delete txn;
@@ -258,6 +272,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
 **/
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
     dprint("[CALL] tm_read(",shared,",",tx,",",source,",",size,",",target,")");
+    if (size != 8) dprint2("BAD!");
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
 
     // Convert void* to word* for easier manipulation
@@ -268,21 +283,19 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     size_t num_words = size / tm_align(shared);
 
     if (txn->is_ro) {
-        dprint("txn is read only");
         // Low-Cost Read-Only Transaction
         // (2) Run through a speculative execution
         for (size_t i = 0; i < num_words; i += 1) {
             word* source_addr = source_start + i;
             word* target_addr = target_start + i;
 
-            dprint("ABOUT TO READ ",*source_addr," from ",source_addr);
+            dprint2("Reading ",*source_addr," from ",source_addr);
             *target_addr = *source_addr;
-            dprint("Read ",*target_addr," from ",source_addr);
             
             // Postvalidate read
             if (!validateRead(shared,source_addr,txn->rv)) {
                 dprint("Failed postvalidate");
-                delete txn;
+                cleanup(txn);
                 return false;
             }
         }
@@ -297,7 +310,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             // Prevalidate read
             if (!validateRead(shared,source_addr,txn->rv)) {
                 dprint("Failed prevalidate");
-                delete txn;
+                cleanup(txn);
                 return false;
             }
             
@@ -309,10 +322,12 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             if (it != txn->write_set.end()) *target_addr = it->second.val;
             else *target_addr = *source_addr;
 
+            dprint2("Writing ",*target_addr," to ",target_addr);
+
             // Postvalidate read
             if (!validateRead(shared,source_addr,txn->rv)) {
                 dprint("Failed postvalidate");
-                delete txn;
+                cleanup(txn);
                 return false;
             }
 
@@ -373,10 +388,10 @@ Alloc tm_alloc(shared_t unused(shared), tx_t tx, size_t size, void** target) noe
         dprint("[FAIL] tm_alloc(",shared,",",tx,",",size,",",target,") -> ",Alloc::nomem);
         return Alloc::nomem;
     }
-    // Add the new segment to the local seg_list
 
-    dprint("Locked segment list");
+    // Add the new segment to the local seg_list
     txn->seg_list.insert(new_seg);
+    txn->local_only_seg_list.insert(new_seg);
 
     memset(new_seg, 0, size);
 
@@ -396,8 +411,6 @@ bool tm_free(shared_t unused(shared), tx_t tx, void* unused(target)) noexcept {
     dprint("[CALL] tm_free(",shared,",",tx,",",target,")");
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
-
-    dprint("Transaction seglist size: ",txn->seg_list.size());
 
     // Can't free initial segment
     if (target == region->start) return false;

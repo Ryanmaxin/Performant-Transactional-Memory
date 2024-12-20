@@ -23,6 +23,13 @@ bool validateRead(shared_t shared, word* addr, version rv, bool check_lock = tru
     return true;
 }
 
+void cleanup(Transaction* txn) {
+    for (auto seg : txn->local_only_seg_list) {
+        free(seg);
+    }
+    delete txn;
+}
+
 void printUnorderedSet(const std::unordered_set<void*>& pointers) {
     std::cout << "Unordered Set contains:" << std::endl;
     for (void* ptr : pointers) {
