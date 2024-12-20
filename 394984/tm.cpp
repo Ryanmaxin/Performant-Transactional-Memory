@@ -37,10 +37,10 @@
 // Custom print function
 template <typename... Args>
 void dprint(Args&&... args) {
-    std::ostringstream oss;
-    oss << "[Thread " << std::this_thread::get_id() << "] ";
-    (oss << ... << args); // Fold expression to handle multiple arguments
-    std::cout << oss.str() << std::endl;
+    // std::ostringstream oss;
+    // oss << "[Thread " << std::this_thread::get_id() << "] ";
+    // (oss << ... << args); // Fold expression to handle multiple arguments
+    // std::cout << oss.str() << std::endl;
 }
 
 // Global variables
@@ -135,9 +135,9 @@ size_t tm_size(shared_t shared) noexcept {
  * @return Alignment used globally
 **/
 size_t tm_align(shared_t shared) noexcept {
-    dprint("[CALL] tm_align(",shared,")");
+    // dprint("[CALL] tm_align(",shared,")");
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
-    dprint("[RETURN] tm_align(",shared,") -> ",region->align);
+    // dprint("[RETURN] tm_align(",shared,") -> ",region->align);
     return region->align;
 }
 
@@ -184,7 +184,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
         if (!lock->lock()) {
             // Here we must delete all previously held locks
             freeHeldLocks(locks_held);
-            dprint("[FAIL1] tm_end(",shared,",",tx,") -> true");
+            dprint("[FAIL1] tm_end(",shared,",",tx,") -> false");
             return false;
         }
         locks_held.push_back(lock);
@@ -198,7 +198,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
         if (!validateRead(shared,read,wv+1,false)) {
             // Here we must delete all previously held locks
             freeHeldLocks(locks_held);
-            dprint("[FAIL2] tm_end(",shared,",",tx,") -> true");
+            dprint("[FAIL2] tm_end(",shared,",",tx,") -> false");
             return false;
         }
     }
@@ -242,7 +242,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     // Transaction successful, cleanup and return
     delete txn;
     dprint("[RETURN] tm_end(",shared,",",tx,") -> true");
-    return false;
+    return true;
 }
 
 /** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
@@ -272,10 +272,13 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             word* source_addr = source_start + i;
             word* target_addr = target_start + i;
 
+            dprint("ABOUT TO READ ",*source_addr," from ",source_addr);
             *target_addr = *source_addr;
-
+            dprint("Read ",*target_addr," from ",source_addr);
+            
             // Postvalidate read
             if (!validateRead(shared,source_addr,txn->rv)) {
+                dprint("Failed postvalidate");
                 delete txn;
                 return false;
             }
@@ -290,6 +293,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
 
             // Prevalidate read
             if (!validateRead(shared,source_addr,txn->rv)) {
+                dprint("Failed prevalidate");
                 delete txn;
                 return false;
             }
@@ -304,6 +308,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
 
             // Postvalidate read
             if (!validateRead(shared,source_addr,txn->rv)) {
+                dprint("Failed postvalidate");
                 delete txn;
                 return false;
             }

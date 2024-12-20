@@ -5,7 +5,7 @@
 constexpr int NUM_ELEMS = 10;
 constexpr int ALIGN = 8;
 constexpr int SIZE = NUM_ELEMS*ALIGN;
-constexpr int NUM_THREADS = 2; // Number of threads
+constexpr int NUM_THREADS = 8; // Number of threads
 
 void printSegment(void* segment, size_t size, bool fillWithZeros = false, bool fillWithLinear = false) {
     for (size_t i = 0; i < size; i++) {
@@ -21,14 +21,18 @@ void printSegment(void* segment, size_t size, bool fillWithZeros = false, bool f
 
 void thread_work(shared_t shared_mem, int thread_id) {
     // Define transaction and operations here
-    void* source = nullptr;
-    void* target = new uint64_t*[SIZE]; // Assuming each element is an int for simplicity
+    void* data = new uint64_t*[NUM_ELEMS];
+    printSegment(data, NUM_ELEMS, false,true);
 
+    void* segment = tm_start(shared_mem); // Start transaction
     tx_t txn = tm_begin(shared_mem, false); // Start a transaction
-    tm_align(shared_mem); // Align transaction
+    std::this_thread::yield();
+    tm_write(shared_mem, txn, data, SIZE, segment); // Write to shared memory
+    std::this_thread::yield();
+    printSegment(segment, NUM_ELEMS, false, false);
     tm_end(shared_mem, txn); // End transaction
 
-    delete[] (uint64_t*)(target); // Clean up
+    delete[] (uint64_t*)(data); // Clean up
 }
 
 int main()
