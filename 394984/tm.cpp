@@ -38,18 +38,18 @@
 // Custom print function
 template <typename... Args>
 void dprint(Args&&... args) {
-    std::ostringstream oss;
-    oss << "[Thread " << std::this_thread::get_id() << "] ";
-    (oss << ... << args); // Fold expression to handle multiple arguments
-    std::cout << oss.str() << std::endl;
+    // std::ostringstream oss;
+    // oss << "[Thread " << std::this_thread::get_id() << "] ";
+    // (oss << ... << args); // Fold expression to handle multiple arguments
+    // std::cout << oss.str() << std::endl;
 }
 // Custom print function
 template <typename... Args>
 void dprint2(Args&&... args) {
-    std::ostringstream oss;
-    oss << "[Thread " << std::this_thread::get_id() << "] ";
-    (oss << ... << args); // Fold expression to handle multiple arguments
-    std::cout << oss.str() << std::endl;
+    // std::ostringstream oss;
+    // oss << "[Thread " << std::this_thread::get_id() << "] ";
+    // (oss << ... << args); // Fold expression to handle multiple arguments
+    // std::cout << oss.str() << std::endl;
 }
 
 // Global variables
@@ -170,7 +170,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
     
-    list<VersionedWriteLock*> locks_held;
+    unordered_set<VersionedWriteLock*> locks_held;
 
     /**
      * @attention A possible optimization is to move onto the next lock if we fail to acquire the current one
@@ -188,7 +188,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
                 dprint("[FAIL1] tm_end(",shared,",",tx,") -> false");
                 return false;
             }
-            locks_held.push_back(lock);
+            locks_held.insert(lock);
         }
         // Now we have every lock we need
         // (4) Increment the global version-clock
@@ -197,7 +197,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
         // (5) Validate the read-set
         for (auto& read : txn->read_set) {
             // validate read set
-            if (!validateRead(shared,read.first,wv + 1,false)) {
+            if (!validateRead(shared,read.first,wv + 1,&locks_held)) {
                 // Here we must delete all previously held locks
                 freeHeldLocks(locks_held);
                 cleanup(txn);
@@ -213,7 +213,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
             void* val = read.second->val;
             memcpy(target_addr,val,word_size);
         }
-
+        
         // (6) Commit and release the locks
         // Commit all of our writes to the shared memory
 
@@ -287,7 +287,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             char* source_addr = source_start + i;
             char* target_addr = target_start + i;
 
-            dprint2("Reading ",*source_addr," from ",source_addr);
+            dprint2("Reading ",*(word*)source_addr," from ",(word*)source_addr);
             // Prevalidate read
             if (!validateRead(shared,source_addr,txn->rv)) {
                 dprint("Failed postvalidate");
@@ -318,7 +318,6 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
                 return false;
             }
             
-
             // Check if the address was written to previously.
             // This will determine if we need to read from the write set or the shared memory region
             char* val_addr = nullptr;
@@ -351,6 +350,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
 **/
 bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
     dprint("[CALL] tm_write(",shared,",",tx,",",source,",",size,",",target,")");
+
     // Write Transaction (2)
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
 
@@ -364,8 +364,24 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
     for (size_t i = 0; i < size; i += word_size) {
         char* source_addr = source_start + i;
         char* target_addr = target_start + i;
-        // Keep track of all of the places we will need to read to
-        txn->write_set.insert_or_assign(target_addr,make_unique<Operation>(source_addr,word_size,source_addr));
+
+        dprint2("Writing ",*(word*)source_addr," to ",(word*)target_addr);
+        // Check if the data we want to write was read to already (overwritten)
+        // This will determine if we need to read from the read set or the shared memory region
+        char* val_addr = nullptr;
+        bool found = false;
+        for (auto& read : txn->read_set) {
+            if (read.second->addr == source_addr) {
+                val_addr = (char*)read.second->val;
+                found = true;
+                break;
+            }
+        }
+        if (!found) val_addr = source_addr;
+
+        
+        // Keep track of all of the places we will need to write to
+        txn->write_set.insert_or_assign(target_addr,make_unique<Operation>(val_addr,word_size,source_addr));
     }
     dprint("[RETURN] tm_write(",shared,",",tx,",",source,",",size,",",target,") -> true");
     return true;

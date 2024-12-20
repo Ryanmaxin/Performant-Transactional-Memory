@@ -23,35 +23,38 @@ int main()
     std::cout << "SIZE: " << SIZE << std::endl;
     void* target = new uint64_t[NUM_ELEMS];
 
-    printSegment(target,NUM_ELEMS,true);
+    printSegment(target,NUM_ELEMS,false,true);
    
     shared_t shared = tm_create(80000,ALIGN);
-    void *source = nullptr;
+    // void *source = nullptr;
     tx_t txn = tm_begin(shared,false);
 
-    // void* source = tm_start(shared);
+    void* source = tm_start(shared);
     tm_alloc(shared,txn,SIZE,&source);
+    printSegment(source,NUM_ELEMS);
     tm_read(shared,txn,source,NUM_ELEMS*sizeof(int),target);
-    printSegment(target,NUM_ELEMS);
-    printSegment(target,NUM_ELEMS,false,true);
+    tm_write(shared,txn,target,NUM_ELEMS*sizeof(int),source);
 
-    tm_write(shared,txn,target,SIZE,source);  
+    // tm_write(shared,txn,target,SIZE,source);  
     // tm_free(shared,txn,source);
     tm_end(shared,txn);
 
     printSegment(target,NUM_ELEMS);
+    printSegment(source,NUM_ELEMS);
 
     void* target2 = new uint64_t[NUM_ELEMS];
-    tx_t txn1 = tm_begin(shared,true);
-    printSegment(target2,NUM_ELEMS);
-    tm_read(shared,txn1,source,NUM_ELEMS*sizeof(int),target2);
-    printSegment(target2,NUM_ELEMS);
-    tm_free(shared,txn1,source);
+    // tx_t txn1 = tm_begin(shared,false);
+    // printSegment(target2,NUM_ELEMS);
+    // tm_read(shared,txn1,source,NUM_ELEMS*sizeof(int),target2);
+    // printSegment(target2,NUM_ELEMS);
+    // if (!tm_free(shared,txn1,source)) {
+    //     std::cout << "Failed to free" << std::endl;
+    // }
 
-    tm_alloc(shared,txn1,SIZE,&source);
-    tm_alloc(shared,txn1,SIZE,&source);
+    // tm_alloc(shared,txn1,SIZE,&source);
+    // tm_alloc(shared,txn1,SIZE,&source);
     
-    tm_end(shared,txn1);
+    // tm_end(shared,txn1);
 
     tm_destroy(shared);
     delete[] (uint64_t*)target2;

@@ -5,10 +5,10 @@
 // Custom print function
 template <typename... Args>
 void dprint(Args&&... args) {
-    std::ostringstream oss;
-    oss << "[Thread " << std::this_thread::get_id() << "] ";
-    (oss << ... << args); // Fold expression to handle multiple arguments
-    std::cout << oss.str() << std::endl;
+    // std::ostringstream oss;
+    // oss << "[Thread " << std::this_thread::get_id() << "] ";
+    // (oss << ... << args); // Fold expression to handle multiple arguments
+    // std::cout << oss.str() << std::endl;
 }
 
 Transaction::Transaction(version gvc, unordered_set<void*>& seg_list_, bool is_ro_): rv{gvc}, seg_list{seg_list_}, is_ro{is_ro_} {}

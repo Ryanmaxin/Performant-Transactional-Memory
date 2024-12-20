@@ -11,16 +11,17 @@
 1. Is not locked
 2. Has version <= rv
 */
-bool validateRead(shared_t shared, char* addr, version rv, bool check_lock = true) {
+bool validateRead(shared_t shared, char* addr, version rv, unordered_set<VersionedWriteLock*>* locks_held = nullptr) {
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
     // Get the lock which protects the address we want to read from.
-    VersionedWriteLock& lock = region->locks[(word)addr % NUM_LOCKS];
+    VersionedWriteLock* lock = &region->locks[(word)addr % NUM_LOCKS];
+    bool lock_owned = false;
+    if (locks_held && locks_held->find(lock) != locks_held->end()) lock_owned = true;
 
-    if ((check_lock && lock.isLocked()) || lock.getVersion() > rv) {
-        return false;
-    }
-    return true;
+    if ((lock_owned || !lock->isLocked()) && lock->getVersion() <= rv) return true;
+
+    return false;
 }
 
 void cleanup(Transaction* txn) {
@@ -38,7 +39,7 @@ void printUnorderedSet(const std::unordered_set<void*>& pointers) {
 }
 
 
-void freeHeldLocks(list<VersionedWriteLock*>& locks_held) {
+void freeHeldLocks(unordered_set<VersionedWriteLock*>& locks_held) {
     for (auto lock : locks_held) {
         lock->unlock();
     }

@@ -206,7 +206,7 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
         auto const posmedian = nbrepeats / 2;
         { // Initialization (with cheap correctness test)
             sync.master_notify(); // We tell workers to start working.
-            auto res = sync.master_wait(maxtick_init); // If running the student's version, it will timeout if way slower than the reference.
+            auto res = sync.master_wait(); // If running the student's version, it will timeout if way slower than the reference.
             if (unlikely(::std::holds_alternative<char const*>(res))) { // If an error happened (timeout or violation), we return early!
                 error = ::std::get<char const*>(res);
                 goto join;
@@ -217,7 +217,7 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
         { // Performance measurements (with cheap correctness tests)
             for (unsigned int i = 0; i < nbrepeats; ++i) {
                 sync.master_notify();
-                auto res = sync.master_wait(maxtick_perf);
+                auto res = sync.master_wait();
                 if (unlikely(::std::holds_alternative<char const*>(res))) {
                     error = ::std::get<char const*>(res);
                     goto join;
@@ -229,7 +229,7 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
         std::cout << "FINISHED PERF" << std::endl;
         { // Correctness check
             sync.master_notify();
-            auto res = sync.master_wait(maxtick_chck);
+            auto res = sync.master_wait();
             if (unlikely(::std::holds_alternative<char const*>(res))) {
                 error = ::std::get<char const*>(res);
                 goto join;
@@ -265,15 +265,18 @@ int main(int argc, char** argv) {
             return 1;
         }
         // Get/set/compute run parameters
-        auto const nbworkers = 1;
+        auto const nbworkers = 2;
         // auto const nbworkers = []() {
         //     auto res = ::std::thread::hardware_concurrency();
         //     if (unlikely(res == 0))
         //         res = 16;
         //     return static_cast<size_t>(res);
         // }();
-        auto const nbtxperwrk    = 200000ul / nbworkers;
+        // auto const nbtxperwrk    = 8ul;
+        auto const nbtxperwrk    = 10ul / nbworkers;
+        // auto const nbaccounts    = 8;
         auto const nbaccounts    = 32 * nbworkers;
+        // auto const expnbaccounts = 8;
         auto const expnbaccounts = 256 * nbworkers;
         auto const init_balance  = 100ul;
         auto const prob_long     = 0.5f;

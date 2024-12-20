@@ -26,9 +26,18 @@
 // External headers
 #include <cstdint>
 #include <random>
+#include <iostream>
 
 // Internal headers
 #include "common.hpp"
+
+template <typename... Args>
+void dprint(Args&&... args) {
+    // std::ostringstream oss;
+    // oss << "[Thread " << std::this_thread::get_id() << "] ";
+    // (oss << ... << args); // Fold expression to handle multiple arguments
+    // std::cout << oss.str() << std::endl;
+}
 
 // -------------------------------------------------------------------------- //
 
@@ -160,23 +169,33 @@ private:
     **/
     bool long_tx(size_t& nbaccounts) const {
         return transactional(tm, Transaction::Mode::read_only, [&](Transaction& tx) {
+                        // std::cout << "------------------------[CONSISTENCY CHECK START]------------------------" << std::endl;
             auto count = 0ul; // Total number of accounts seen.
             auto sum   = Balance{0}; // Total balance on all seen accounts + parity ammount.
             auto start = tm.get_start(); // The list of accounts starts at the first word of the shared memory region.
             while (start) {
                 AccountSegment segment{tx, start}; // We interpret the memory as a segment/array of accounts.
+                dprint("COUNT");
                 decltype(count) segment_count = segment.count;
                 count += segment_count; // And accumulate the total number of accounts.
+                dprint("PARITY");
                 sum += segment.parity; // We also sum the money that results from the destruction of accounts.
                 for (decltype(count) i = 0; i < segment_count; ++i) {
                     Balance local = segment.accounts[i];
+                    dprint("\033Account ", i, " has balance ", local,"\033");
                     if (unlikely(local < 0)) // If one account has a negative balance, there's a consistency issue.
                         return false;
                     sum += local;
                 }
+                dprint("NEXT");
                 start = segment.next; // Accounts are stored in linked segments, we move to the next one.
             }
             nbaccounts = count;
+            // std::cout << "------------------------[CONSISTENCY CHECK END]------------------------" << std::endl;
+            // std::cout << "Initial Balance: " << init_balance * count << std::endl;
+            // std::cout << "Now Sum: " << sum << std::endl;
+            // std::cout << "------------------------[CONSISTENCY CHECK END BALANCES]------------------------" << std::endl;
+            
             return sum == static_cast<Balance>(init_balance * count); // Consistency check: no money should ever be destroyed or created out of thin air.
         });
     }
@@ -379,6 +398,7 @@ public:
         if (uid == 0) {
             auto correct = transactional(tm, Transaction::Mode::read_only, [&](Transaction& tx) {
                 Shared<size_t> counter{tx, tm.get_start()};
+                std::cout << "Counter: " << counter << std::endl;
                 return counter == 0;
             });
             if (unlikely(!correct))
