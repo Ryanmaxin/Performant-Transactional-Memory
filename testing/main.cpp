@@ -20,7 +20,7 @@ void printSegment(void* segment, size_t size, bool fillWithZeros = false, bool f
 int main()
 {
     std::cout << "SIZE: " << SIZE << std::endl;
-    void* target = new int[NUM_ELEMS];
+    void* target = new uint64_t[NUM_ELEMS];
 
     printSegment(target,NUM_ELEMS,true);
    
@@ -40,7 +40,7 @@ int main()
 
     printSegment(target,NUM_ELEMS);
 
-    void* target2 = new int[NUM_ELEMS];
+    void* target2 = new uint64_t[NUM_ELEMS];
     tx_t txn1 = tm_begin(shared,true);
     printSegment(target2,NUM_ELEMS);
     tm_read(shared,txn1,source,NUM_ELEMS*sizeof(int),target2);
@@ -53,5 +53,7 @@ int main()
     tm_end(shared,txn1);
 
     tm_destroy(shared);
+    delete[] (uint64_t*)target2;
+    delete[] (uint64_t*)target;
     return 0;
 }

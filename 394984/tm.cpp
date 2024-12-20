@@ -98,6 +98,7 @@ void tm_destroy(shared_t shared) noexcept {
     region->master_seg_list.clear();
 
     delete[] region->locks;
+    delete region->list_lock;
 
     free(region->start);
     dprint("[RETURN] tm_destroy(",shared,")");
