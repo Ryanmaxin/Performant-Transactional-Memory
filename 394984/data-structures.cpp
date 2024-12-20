@@ -15,7 +15,23 @@ Transaction::Transaction(version gvc, unordered_set<void*>& seg_list_, bool is_r
 
 MemoryRegion::MemoryRegion(size_t size_, size_t align_): size{size_}, align{align_}, locks{nullptr}, start{nullptr} {}
 
-WriteOperation::WriteOperation(word* source_, word val_): source{source_}, val{val_} {}
+MemoryRegion::~MemoryRegion() {
+    // Free all of the segments and clear the list
+    for (auto& seg : master_seg_list) {
+        free(seg);
+    }
+    master_seg_list.clear();
+    delete[] locks;
+    free(start);
+}
+
+Operation::Operation(char* data, size_t word_size, void* addr_): val{aligned_alloc(word_size, word_size)}, addr{addr_} {
+    memcpy(val, data, word_size);
+}
+
+Operation::~Operation() {
+    free(val);
+}
 
 VersionedWriteLock::VersionedWriteLock(): version_and_lock{0} {};
 

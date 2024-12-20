@@ -11,7 +11,7 @@
 1. Is not locked
 2. Has version <= rv
 */
-bool validateRead(shared_t shared, word* addr, version rv, bool check_lock = true) {
+bool validateRead(shared_t shared, char* addr, version rv, bool check_lock = true) {
     MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
     // Get the lock which protects the address we want to read from.

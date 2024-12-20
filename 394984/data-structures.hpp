@@ -38,20 +38,21 @@ struct MemoryRegion {
     VersionedWriteLock* locks;
     void* start;
     MemoryRegion(size_t size, size_t align);
+    ~MemoryRegion();
 };
 
-struct WriteOperation {
-    // All of the locations we need to 
-    word* source;
-    word val;
-    WriteOperation(word* source_, word val_);
+struct Operation {
+    void* val;
+    void* addr;
+    Operation(char* data, size_t word_size, void* addr_);
+    ~Operation();
     // WriteOperation& operator=(WriteOperation&& other);
 };
 
 struct Transaction {
     version rv;
-    unordered_set<word*> read_set;
-    unordered_map<word*, WriteOperation> write_set;
+    unordered_map<char*, unique_ptr<Operation>> read_set;
+    unordered_map<char*, unique_ptr<Operation>> write_set;
     unordered_set<void*> seg_list;
     unordered_set<void*> local_only_seg_list;
     unordered_set<void*> free_seg_list;
