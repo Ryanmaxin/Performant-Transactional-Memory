@@ -181,38 +181,44 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
         for (auto& keyval : txn->write_set) {
             char* target_addr = keyval.first;
             VersionedWriteLock* lock = &region->locks[(word)target_addr % NUM_LOCKS];
-            if (!lock->lock()) {
+            if (!lock->lock() && locks_held.find(lock) == locks_held.end()) {
                 // Here we must delete all previously held locks
                 freeHeldLocks(locks_held);
                 cleanup(txn);
-                dprint("[FAIL1] tm_end(",shared,",",tx,") -> false");
+                dprint2("TM_END: failed to acquire locks");
                 return false;
             }
             locks_held.insert(lock);
         }
         // Now we have every lock we need
         // (4) Increment the global version-clock
-        version wv = gvc.fetch_add(1);
+        version wv = gvc.fetch_add(1) + 1;
 
         // (5) Validate the read-set
-        for (auto& read : txn->read_set) {
-            // validate read set
-            if (!validateRead(shared,read.first,wv + 1,&locks_held)) {
-                // Here we must delete all previously held locks
-                freeHeldLocks(locks_held);
-                cleanup(txn);
-                dprint("[FAIL2] tm_end(",shared,",",tx,") -> false");
-                return false;
-            }
-        }   
+        if (txn->rv + 1 != wv) {
+            for (auto& read : txn->read_set) {
+                void* source_addr = read.first;
+
+                // Get the lock which protects the address we want to read from.
+                VersionedWriteLock* lock = &region->locks[(word)source_addr % NUM_LOCKS];
+                bool lock_owned = (locks_held.find(lock) != locks_held.end());
+                if ((!lock_owned && lock->isLocked()) || lock->getVersion() > txn->rv) {
+                    // Here we must delete all previously held locks
+                    freeHeldLocks(locks_held);
+                    cleanup(txn);
+                    dprint2("TM_END: read-set not valid");
+                    return false;
+                }
+            }   
+        }
 
         size_t word_size = tm_align(shared);
 
-        for (auto& read : txn->read_set) {
-            void* target_addr = read.second->addr;
-            void* val = read.second->val;
-            memcpy(target_addr,val,word_size);
-        }
+        // for (auto& read : txn->read_set) {
+        //     void* target_addr = read.second->addr;
+        //     void* val = read.second->val;
+        //     memcpy(target_addr,val,word_size);
+        // }
         
         // (6) Commit and release the locks
         // Commit all of our writes to the shared memory
@@ -272,6 +278,7 @@ bool tm_end(shared_t unused(shared), tx_t tx) noexcept {
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) noexcept {
     dprint("[CALL] tm_read(",shared,",",tx,",",source,",",size,",",target,")");
     Transaction *txn = reinterpret_cast<Transaction*>(tx);
+    MemoryRegion* region = reinterpret_cast<MemoryRegion*>(shared);
 
     // Convert void* to word* for easier manipulation
     char* target_start = (char*)(target);
@@ -289,16 +296,22 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
 
             dprint2("Reading ",*(word*)source_addr," from ",(word*)source_addr);
             // Prevalidate read
-            if (!validateRead(shared,source_addr,txn->rv)) {
-                dprint("Failed postvalidate");
+
+            // Get the lock which protects the address we want to read from.
+            VersionedWriteLock* lock = &region->locks[(word)source_addr % NUM_LOCKS];
+            word version = lock->getVersion();
+            if (lock->isLocked() || version > txn->rv) {
+                dprint2("Failed prevalidate",version,txn->rv);
                 cleanup(txn);
                 return false;
             }
+
             memcpy(target_addr,source_addr,word_size);
             
-            // Postvalidate read
-            if (!validateRead(shared,source_addr,txn->rv)) {
-                dprint("Failed postvalidate");
+            // Get the lock which protects the address we want to read from.
+            word new_version = lock->getVersion();
+            if (lock->isLocked() || new_version != version || new_version > txn->rv) {
+                dprint2("Failed postvalidate",lock->isLocked(),new_version !=version,new_version > txn->rv);
                 cleanup(txn);
                 return false;
             }
@@ -311,12 +324,16 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             char* source_addr = source_start + i;
             char* target_addr = target_start + i;
 
-            // Prevalidate read
-            if (!validateRead(shared,source_addr,txn->rv)) {
-                dprint2("Failed prevalidate");
+            // Get the lock which protects the address we want to read from.
+            VersionedWriteLock* lock = &region->locks[(word)source_addr % NUM_LOCKS];
+
+            word version = lock->getVersion();
+            if (lock->isLocked() || version > txn->rv) {
+                dprint2("Failed prevalidate HERE");
                 cleanup(txn);
                 return false;
             }
+
             
             // Check if the address was written to previously.
             // This will determine if we need to read from the write set or the shared memory region
@@ -325,9 +342,11 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             if (it != txn->write_set.end()) val_addr = (char*)it->second->val;
             else val_addr = source_addr;
 
-            // Postvalidate read
-            if (!validateRead(shared,source_addr,txn->rv)) {
-                dprint2("Failed postvalidate");
+            memcpy(target_addr,val_addr,word_size);
+
+            word new_version = lock->getVersion();
+            if (lock->isLocked() || new_version != version) {
+                dprint2("Failed postvalidate HERE");
                 cleanup(txn);
                 return false;
             }
@@ -370,13 +389,13 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
         // This will determine if we need to read from the read set or the shared memory region
         char* val_addr = nullptr;
         bool found = false;
-        for (auto& read : txn->read_set) {
-            if (read.second->addr == source_addr) {
-                val_addr = (char*)read.second->val;
-                found = true;
-                break;
-            }
-        }
+        // for (auto& read : txn->read_set) {
+        //     if (read.second->addr == source_addr) {
+        //         val_addr = (char*)read.second->val;
+        //         found = true;
+        //         break;
+        //     }
+        // }
         if (!found) val_addr = source_addr;
 
         

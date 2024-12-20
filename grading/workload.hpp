@@ -33,7 +33,7 @@
 
 template <typename... Args>
 void dprint(Args&&... args) {
-    // std::ostringstream oss;
+    std::ostringstream oss;
     // oss << "[Thread " << std::this_thread::get_id() << "] ";
     // (oss << ... << args); // Fold expression to handle multiple arguments
     // std::cout << oss.str() << std::endl;
@@ -398,7 +398,6 @@ public:
         if (uid == 0) {
             auto correct = transactional(tm, Transaction::Mode::read_only, [&](Transaction& tx) {
                 Shared<size_t> counter{tx, tm.get_start()};
-                std::cout << "Counter: " << counter << std::endl;
                 return counter == 0;
             });
             if (unlikely(!correct))

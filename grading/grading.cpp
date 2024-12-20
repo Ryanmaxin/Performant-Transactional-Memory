@@ -213,7 +213,6 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
             }
             time_init = ::std::get<Chrono>(res).get_tick();
         }
-        std::cout << "FINISHED INIT" << std::endl;
         { // Performance measurements (with cheap correctness tests)
             for (unsigned int i = 0; i < nbrepeats; ++i) {
                 sync.master_notify();
@@ -226,7 +225,6 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
             }
             ::std::nth_element(times, times + posmedian, times + nbrepeats); // Partition times around the median
         }
-        std::cout << "FINISHED PERF" << std::endl;
         { // Correctness check
             sync.master_notify();
             auto res = sync.master_wait();
@@ -236,7 +234,6 @@ static auto measure(Workload& workload, unsigned int const nbthreads, unsigned i
             }
             time_chck = ::std::get<Chrono>(res).get_tick();
         }
-        std::cout << "FINISHED CORR" << std::endl;
         join: { // Joining
             sync.master_join(); // Join with threads
             for (unsigned int i = 0; i < nbthreads; ++i)
@@ -265,15 +262,15 @@ int main(int argc, char** argv) {
             return 1;
         }
         // Get/set/compute run parameters
-        auto const nbworkers = 2;
-        // auto const nbworkers = []() {
-        //     auto res = ::std::thread::hardware_concurrency();
-        //     if (unlikely(res == 0))
-        //         res = 16;
-        //     return static_cast<size_t>(res);
-        // }();
+        // auto const nbworkers = 2;
+        auto const nbworkers = []() {
+            auto res = ::std::thread::hardware_concurrency();
+            if (unlikely(res == 0))
+                res = 16;
+            return static_cast<size_t>(res);
+        }();
         // auto const nbtxperwrk    = 8ul;
-        auto const nbtxperwrk    = 10ul / nbworkers;
+        auto const nbtxperwrk    = 20ul / nbworkers;
         // auto const nbaccounts    = 8;
         auto const nbaccounts    = 32 * nbworkers;
         // auto const expnbaccounts = 8;
