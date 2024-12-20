@@ -17,7 +17,6 @@ using word = uintptr_t;
 
 using version = uint64_t;
 
-constexpr size_t SPIN_COUNT_MAX = 1000;
 constexpr size_t NUM_LOCKS = 10000;
 
 struct VersionedWriteLock {
@@ -31,7 +30,7 @@ struct VersionedWriteLock {
 };
 
 struct MemoryRegion {
-    unordered_set<void*> master_seg_list;
+    list<void*> seg_list;
     mutex list_lock;
     size_t size;
     size_t align;
@@ -41,23 +40,20 @@ struct MemoryRegion {
     ~MemoryRegion();
 };
 
-struct Operation {
+struct WriteOperation {
     void* val;
-    void* addr;
-    Operation(char* data, size_t word_size, void* addr_);
-    ~Operation();
-    // WriteOperation& operator=(WriteOperation&& other);
+    WriteOperation(char* data, size_t word_size);
+    ~WriteOperation();
 };
 
 struct Transaction {
     version rv;
-    unordered_map<char*, unique_ptr<Operation>> read_set;
-    unordered_map<char*, unique_ptr<Operation>> write_set;
-    unordered_set<void*> seg_list;
-    unordered_set<void*> local_only_seg_list;
-    unordered_set<void*> free_seg_list;
+    unordered_set<char*> read_set;
+    unordered_map<char*, unique_ptr<WriteOperation>> write_set;
+    list<void*> seg_list;
     bool is_ro;
-    Transaction(version gvc, unordered_set<void*>& seg_list_, bool is_ro_);
+    Transaction(version gvc, bool is_ro_);
+    ~Transaction();
 };
 
 
