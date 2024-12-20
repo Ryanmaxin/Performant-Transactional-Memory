@@ -64,6 +64,6 @@ bool VersionedWriteLock::isLocked() {
 }
 
 void VersionedWriteLock::setVersion(version v) {
-    word new_val = v << 1 | 0; // Set the version while and unlock
+    word new_val = v << 1 | 0; // Set the version and unlock
     version_and_lock.store(new_val);
 }

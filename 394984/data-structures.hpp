@@ -6,6 +6,7 @@
 #include <map>
 #include <list>
 #include <atomic>
+#include <mutex>
 
 // Internal headers
 #include <tm.hpp>
