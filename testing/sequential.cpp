@@ -1,5 +1,6 @@
 #include "../include/tm.hpp"
 #include <iostream>
+#include <thread>
 
 constexpr int NUM_ELEMS = 10;
 constexpr int ALIGN = 8;

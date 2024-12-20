@@ -5,7 +5,7 @@ CXXFLAGS := -std=c++17 -fPIC -shared -Wall
 # Paths
 SO_DIR := ../394984
 SO_FILE := ../394984.so
-MAIN_CPP := ./main.cpp
+MAIN_CPP := ./concurrent.cpp
 EXECUTABLE := test
 
 .PHONY: all clean run
