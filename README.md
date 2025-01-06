@@ -2,6 +2,13 @@
 
 **Note:** This project was created as my final project for CS-453 concurrent computing at EPFL during the Fall 2024 term.
 
+## Performance:
+
+My implementation achieves a performance improvement of approximately 6x compared to a coarse-grained locking solution.
+
+![image](https://github.com/user-attachments/assets/306dde4b-53ac-400f-815c-2766b23eb113)
+
+
 ## Specification:
 The **software transactional memory (STM) library** sees and controls every access to the shared memory. The library can delay execution, return two different values when reading the same address from two different, concurrent transactions, etc. Essentially, the goal of the library is to make concurrent transactions appear as if they were executed serially, without concurrency.
 
