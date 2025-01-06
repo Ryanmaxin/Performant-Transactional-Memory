@@ -1,6 +1,6 @@
 # Software Transactional Memory (STM) Library
 
-## **Note:** This project was created as my final project for CS-453 concurrent computing at EPFL during the Fall 2024 term.
+**Note:** This project was created as my final project for CS-453 concurrent computing at EPFL during the Fall 2024 term.
 
 ## Specification:
 The **software transactional memory (STM) library** sees and controls every access to the shared memory. The library can delay execution, return two different values when reading the same address from two different, concurrent transactions, etc. Essentially, the goal of the library is to make concurrent transactions appear as if they were executed serially, without concurrency.
