@@ -10,7 +10,7 @@ My implementation of transactional memory achieves a performance improvement of 
 
 
 ## Specification:
-The **software transactional memory (STM) library** sees and controls every access to the shared memory. The library can delay execution, return two different values when reading the same address from two different, concurrent transactions, etc. Essentially, the goal of the library is to make concurrent transactions appear as if they were executed serially, without concurrency.
+The **software transactional memory (STM) library** sees and controls every access to the shared memory. The library can delay execution, return two different values when reading the same address from two different concurrent transactions, etc. Essentially, the goal of the library is to make concurrent transactions appear as if they were executed serially, without concurrency.
 
 ### Core Notions of STM
 To achieve the informal goal described above, STM relies on three core notions:
