@@ -4,7 +4,7 @@
 
 ## Performance:
 
-My implementation of transactional memory achieves a performance improvement of approximately 6x compared to a coarse-grained locking solution.
+My implementation of transactional memory achieves a performance improvement of approximately 6x compared to a reference coarse-grained locking solution.
 
 ![image](https://github.com/user-attachments/assets/306dde4b-53ac-400f-815c-2766b23eb113)
 
